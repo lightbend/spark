@@ -164,7 +164,7 @@ private[spark] class CoarseMesosSchedulerBackend(
       command.setValue(
         "%s \"%s\" org.apache.spark.executor.CoarseGrainedExecutorBackend"
           .format(prefixEnv, runScript) +
-        s" --driver-url $driverURL" +
+        s" --driver-url $driverUrl" +
         s" --executor-id ${offer.getSlaveId.getValue}" +
         s" --hostname ${offer.getHostname}" +
         s" --cores $numCores" +
@@ -176,7 +176,7 @@ private[spark] class CoarseMesosSchedulerBackend(
       command.setValue(
         s"cd $basename*; $prefixEnv " +
          "./bin/spark-class org.apache.spark.executor.CoarseGrainedExecutorBackend" +
-        s" --driver-url $driverURL" +
+        s" --driver-url $driverUrl" +
         s" --executor-id ${offer.getSlaveId.getValue}" +
         s" --hostname ${offer.getHostname}" +
         s" --cores $numCores" +
@@ -186,7 +186,7 @@ private[spark] class CoarseMesosSchedulerBackend(
     command.build()
   }
 
-  protected def driverURL: String = {
+  protected def driverUrl: String = {
     AkkaUtils.address(
       AkkaUtils.protocol(sc.env.actorSystem),
       SparkEnv.driverActorSystemName,

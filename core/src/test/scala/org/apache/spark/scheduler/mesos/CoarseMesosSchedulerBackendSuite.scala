@@ -38,7 +38,7 @@ import scala.collection.mutable
 
 class CoarseMesosSchedulerBackendSuite extends FunSuite with LocalSparkContext with MockitoSugar {
 
-  def createOffer(offerId: String, slaveId: String, mem: Int, cpu: Int) = {
+  private def createOffer(offerId: String, slaveId: String, mem: Int, cpu: Int) = {
     val builder = Offer.newBuilder()
     builder.addResourcesBuilder()
       .setName("mem")
@@ -52,11 +52,11 @@ class CoarseMesosSchedulerBackendSuite extends FunSuite with LocalSparkContext w
       .setSlaveId(SlaveID.newBuilder().setValue(slaveId)).setHostname(s"host${slaveId}").build()
   }
 
-  test("mesos supports killing and limiting executors") {
+
+  private def mockEnvironment(sparkConf: SparkConf): (SparkContext, TaskSchedulerImpl, SchedulerDriver) = {
     val driver = mock[SchedulerDriver]
     val taskScheduler = mock[TaskSchedulerImpl]
     val se = mock[SparkEnv]
-    val sparkConf = new SparkConf
     val sc = mock[SparkContext]
     when(sc.executorMemory).thenReturn(100)
     when(sc.getSparkHome()).thenReturn(Option("/path"))
@@ -65,6 +65,12 @@ class CoarseMesosSchedulerBackendSuite extends FunSuite with LocalSparkContext w
     when(sc.conf).thenReturn(sparkConf)
     when(sc.env).thenReturn(se)
     when(taskScheduler.sc).thenReturn(sc)
+    (sc, taskScheduler, driver)
+  }
+
+  test("mesos supports killing and limiting executors") {
+    val sparkConf = new SparkConf
+    val (sc, taskScheduler, driver) = mockEnvironment(sparkConf)
 
     sparkConf.set("spark.driver.host", "driverHost")
     sparkConf.set("spark.driver.port", "1234")
@@ -78,7 +84,7 @@ class CoarseMesosSchedulerBackendSuite extends FunSuite with LocalSparkContext w
     val taskID0 = TaskID.newBuilder().setValue("0").build()
 
     val backend = new CoarseMesosSchedulerBackend(taskScheduler, sc, "master") {
-      override def driverURL = "driverURL"
+      override val driverUrl = "<stub>"
     }
     backend.driver = driver
     backend.resourceOffers(driver, mesosOffers)
@@ -115,18 +121,8 @@ class CoarseMesosSchedulerBackendSuite extends FunSuite with LocalSparkContext w
   }
 
   test("mesos supports killing and relaunching tasks with executors") {
-    val driver = mock[SchedulerDriver]
-    val taskScheduler = mock[TaskSchedulerImpl]
-    val se = mock[SparkEnv]
     val sparkConf = new SparkConf
-    val sc = mock[SparkContext]
-    when(sc.executorMemory).thenReturn(100)
-    when(sc.getSparkHome()).thenReturn(Option("/path"))
-    val emptyHashMap = new mutable.HashMap[String, String]
-    when(sc.executorEnvs).thenReturn(emptyHashMap)
-    when(sc.conf).thenReturn(sparkConf)
-    when(sc.env).thenReturn(se)
-    when(taskScheduler.sc).thenReturn(sc)
+    val (sc, taskScheduler, driver) = mockEnvironment(sparkConf)
 
     val minMem = MemoryUtils.calculateTotalMemory(sc).toInt + 1024
     val minCpu = 4
@@ -138,7 +134,7 @@ class CoarseMesosSchedulerBackendSuite extends FunSuite with LocalSparkContext w
     val offer2 = createOffer("o2", "s1", minMem, 1);
 
     val backend = new CoarseMesosSchedulerBackend(taskScheduler, sc, "master") {
-      override val driverURL = "<stub>"
+      override protected val driverUrl: String = "<stub>"
     }
     backend.driver = driver
     backend.resourceOffers(driver, mesosOffers)
