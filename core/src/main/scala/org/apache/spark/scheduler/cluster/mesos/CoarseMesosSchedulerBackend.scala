@@ -73,13 +73,17 @@ private[spark] class CoarseMesosSchedulerBackend(
   val slaveIdsWithExecutors = new HashSet[String]
 
   val taskIdToSlaveId: HashBiMap[Int, String] = HashBiMap.create[Int, String]
-  val failuresBySlaveId: HashMap[String, Int] = new HashMap[String, Int] // How many times tasks on each slave failed
+  // How many times tasks on each slave failed
+  val failuresBySlaveId: HashMap[String, Int] = new HashMap[String, Int]
 
 
   // the total number of executors we aim to have
   private[mesos] var executorLimitOption: Option[Int] = None
 
-  /** Return the current executor limit, which may be [[Int.MaxValue]] before properly initialized. */
+  /**
+   *  Return the current executor limit, which may be [[Int.MaxValue]]
+   *  before properly initialized.
+   */
   def executorLimit = executorLimitOption.getOrElse(Int.MaxValue)
 
   private[mesos] val pendingRemovedSlaveIds = new HashSet[String]
