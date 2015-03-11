@@ -77,8 +77,12 @@ private[spark] class CoarseMesosSchedulerBackend(
 
 
   // the total number of executors we aim to have
-  private var executorLimit: Option[Int] = None
-  private val pendingRemovedSlaveIds = new HashSet[String]
+  private[mesos] var executorLimitOption: Option[Int] = None
+
+  /** Return the current executor limit, which may be [[Int.MaxValue]] before properly initialized. */
+  def executorLimit = executorLimitOption.getOrElse(Int.MaxValue)
+
+  private[mesos] val pendingRemovedSlaveIds = new HashSet[String]
 
   // private lock object protecting mutable state above. Using the intrinsic lock
   // may lead to deadlocks since the superclass might also try to lock
@@ -153,12 +157,6 @@ private[spark] class CoarseMesosSchedulerBackend(
     }
     val command = CommandInfo.newBuilder()
       .setEnvironment(environment)
-    val driverUrl = AkkaUtils.address(
-      AkkaUtils.protocol(sc.env.actorSystem),
-      SparkEnv.driverActorSystemName,
-      conf.get("spark.driver.host"),
-      conf.get("spark.driver.port"),
-      CoarseGrainedSchedulerBackend.ACTOR_NAME)
 
     val uri = conf.get("spark.executor.uri", null)
     if (uri == null) {
@@ -166,7 +164,7 @@ private[spark] class CoarseMesosSchedulerBackend(
       command.setValue(
         "%s \"%s\" org.apache.spark.executor.CoarseGrainedExecutorBackend"
           .format(prefixEnv, runScript) +
-        s" --driver-url $driverUrl" +
+        s" --driver-url $driverURL" +
         s" --executor-id ${offer.getSlaveId.getValue}" +
         s" --hostname ${offer.getHostname}" +
         s" --cores $numCores" +
@@ -178,7 +176,7 @@ private[spark] class CoarseMesosSchedulerBackend(
       command.setValue(
         s"cd $basename*; $prefixEnv " +
          "./bin/spark-class org.apache.spark.executor.CoarseGrainedExecutorBackend" +
-        s" --driver-url $driverUrl" +
+        s" --driver-url $driverURL" +
         s" --executor-id ${offer.getSlaveId.getValue}" +
         s" --hostname ${offer.getHostname}" +
         s" --cores $numCores" +
@@ -186,6 +184,15 @@ private[spark] class CoarseMesosSchedulerBackend(
       command.addUris(CommandInfo.URI.newBuilder().setValue(uri))
     }
     command.build()
+  }
+
+  protected def driverURL: String = {
+    AkkaUtils.address(
+      AkkaUtils.protocol(sc.env.actorSystem),
+      SparkEnv.driverActorSystemName,
+      conf.get("spark.driver.host"),
+      conf.get("spark.driver.port"),
+      CoarseGrainedSchedulerBackend.ACTOR_NAME)
   }
 
   override def offerRescinded(d: SchedulerDriver, o: OfferID) {}
@@ -220,10 +227,11 @@ private[spark] class CoarseMesosSchedulerBackend(
       val filters = Filters.newBuilder().setRefuseSeconds(-1).build()
 
       for (offer <- offers) {
-        val slaveId = offer.getSlaveId.toString
+        val slaveId = offer.getSlaveId.getValue
         val mem = getResource(offer.getResourcesList, "mem")
         val cpus = getResource(offer.getResourcesList, "cpus").toInt
-        if (totalCoresAcquired < maxCores &&
+        if (taskIdToSlaveId.size < executorLimitOption.getOrElse(Int.MaxValue) &&
+            totalCoresAcquired < maxCores &&
             mem >= MemoryUtils.calculateTotalMemory(sc) &&
             cpus >= 1 &&
             failuresBySlaveId.getOrElse(slaveId, 0) < MAX_SLAVE_FAILURES &&
@@ -364,7 +372,7 @@ private[spark] class CoarseMesosSchedulerBackend(
     // We don't truly know if we can fulfill the full amount of executors
     // since at coarse grain it depends on the amount of slaves available.
     logInfo("Capping the total amount of executors to " + requestedTotal)
-    executorLimit = Option(requestedTotal)
+    executorLimitOption = Option(requestedTotal)
     true
   }
 
@@ -393,7 +401,7 @@ private[spark] class CoarseMesosSchedulerBackend(
     // executors, that means the scheduler wants to set the limit that is less than
     // the amount of the executors that has been launched. Therefore, we take the existing
     // amount of executors launched and deduct the executors killed as the new limit.
-    executorLimit = Option(taskIdToSlaveId.size - pendingRemovedSlaveIds.size)
+    executorLimitOption = Option(taskIdToSlaveId.size - pendingRemovedSlaveIds.size)
     true
   }
 }
