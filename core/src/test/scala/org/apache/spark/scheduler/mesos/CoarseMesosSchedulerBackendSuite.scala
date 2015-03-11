@@ -26,11 +26,11 @@ import org.apache.mesos.Protos.Value.Scalar
 import org.apache.mesos.Protos._
 import org.apache.mesos.SchedulerDriver
 import org.apache.spark.scheduler.TaskSchedulerImpl
-import org.apache.spark.scheduler.cluster.mesos.{CoarseMesosSchedulerBackend, MemoryUtils}
-import org.apache.spark.{LocalSparkContext, SparkConf, SparkEnv, SparkContext}
+import org.apache.spark.scheduler.cluster.mesos.{ CoarseMesosSchedulerBackend, MemoryUtils }
+import org.apache.spark.{ LocalSparkContext, SparkConf, SparkEnv, SparkContext }
 import org.mockito.Matchers._
 import org.mockito.Mockito._
-import org.mockito.{ArgumentCaptor, Matchers}
+import org.mockito.{ ArgumentCaptor, Matchers }
 import org.scalatest.FunSuite
 import org.scalatest.mock.MockitoSugar
 
@@ -60,7 +60,7 @@ class CoarseMesosSchedulerBackendSuite extends FunSuite with LocalSparkContext w
     val sc = mock[SparkContext]
     when(sc.executorMemory).thenReturn(100)
     when(sc.getSparkHome()).thenReturn(Option("/path"))
-    val emptyHashMap = new mutable.HashMap[String,String]
+    val emptyHashMap = new mutable.HashMap[String, String]
     when(sc.executorEnvs).thenReturn(emptyHashMap)
     when(sc.conf).thenReturn(sparkConf)
     when(sc.env).thenReturn(se)
@@ -75,29 +75,17 @@ class CoarseMesosSchedulerBackendSuite extends FunSuite with LocalSparkContext w
     val mesosOffers = new java.util.ArrayList[Offer]
     mesosOffers.add(createOffer("o1", "s1", minMem, minCpu))
 
-    val capture = ArgumentCaptor.forClass(classOf[util.Collection[TaskInfo]])
-    when(
-      driver.launchTasks(
-        Matchers.eq(Collections.singleton(mesosOffers.get(0).getId)),
-        capture.capture(),
-        any(classOf[Filters])
-      )
-    ).thenReturn(Status.valueOf(1))
-
     val taskID0 = TaskID.newBuilder().setValue("0").build()
-    when(
-      driver.killTask(taskID0)
-    ).thenReturn(Status.valueOf(1))
-
-    when(
-      driver.declineOffer(OfferID.newBuilder().setValue("o2").build())
-    ).thenReturn(Status.valueOf(1))
 
     val backend = new CoarseMesosSchedulerBackend(taskScheduler, sc, "master") {
       override def driverURL = "driverURL"
     }
     backend.driver = driver
     backend.resourceOffers(driver, mesosOffers)
+    verify(driver, times(1)).launchTasks(
+        Matchers.eq(Collections.singleton(mesosOffers.get(0).getId)),
+        any[util.Collection[TaskInfo]],
+        any[Filters])
 
     // Calling doKillExecutors should invoke driver.killTask.
     assert(backend.doKillExecutors(Seq("s1/0")))
@@ -108,99 +96,78 @@ class CoarseMesosSchedulerBackendSuite extends FunSuite with LocalSparkContext w
     mesosOffers2.add(createOffer("o2", "s2", minMem, minCpu))
     backend.resourceOffers(driver, mesosOffers2)
 
+    verify(driver, times(1))
+      .declineOffer(OfferID.newBuilder().setValue("o2").build())
+
     // Verify we didn't launch any new executor
     assert(backend.slaveIdsWithExecutors.size === 1)
 
-    when(
-      driver.launchTasks(
-        Matchers.eq(Collections.singleton(mesosOffers2.get(0).getId)),
-        capture.capture(),
-        any(classOf[Filters])
-      )
-    ).thenReturn(Status.valueOf(1))
-
     backend.doRequestTotalExecutors(2)
     backend.resourceOffers(driver, mesosOffers2)
+    verify(driver, times(1)).launchTasks(
+        Matchers.eq(Collections.singleton(mesosOffers2.get(0).getId)),
+        any[util.Collection[TaskInfo]],
+        any[Filters])
 
     assert(backend.slaveIdsWithExecutors.size === 2)
     backend.slaveLost(driver, SlaveID.newBuilder().setValue("s1").build())
     assert(backend.slaveIdsWithExecutors.size === 1)
   }
 
-  // test("mesos supports killing and relaunching tasks with executors") {
-  //   val driver = mock[SchedulerDriver]
-  //   val taskScheduler = mock[TaskSchedulerImpl]
+  test("mesos supports killing and relaunching tasks with executors") {
+    val driver = mock[SchedulerDriver]
+    val taskScheduler = mock[TaskSchedulerImpl]
+    val se = mock[SparkEnv]
+    val sparkConf = new SparkConf
+    val sc = mock[SparkContext]
+    when(sc.executorMemory).thenReturn(100)
+    when(sc.getSparkHome()).thenReturn(Option("/path"))
+    val emptyHashMap = new mutable.HashMap[String, String]
+    when(sc.executorEnvs).thenReturn(emptyHashMap)
+    when(sc.conf).thenReturn(sparkConf)
+    when(sc.env).thenReturn(se)
+    when(taskScheduler.sc).thenReturn(sc)
 
-  //   val se = mock[SparkEnv]
-  //   val actorSystem = mock[ActorSystem]
-  //   val sparkConf = new SparkConf
-  //   when(se.actorSystem).thenReturn(actorSystem)
-  //   EasyMock.replay(se)
-  //   val sc = mock[SparkContext]
-  //   when(sc.executorMemory).thenReturn(100).anyTimes()
-  //   when(sc.getSparkHome()).thenReturn(Option("/path")).anyTimes()
-  //   when(sc.executorEnvs).thenReturn(new mutable.HashMap).anyTimes()
-  //   when(sc.conf).thenReturn(sparkConf).anyTimes()
-  //   when(sc.env).thenReturn(se)
-  //   EasyMock.replay(sc)
+    val minMem = MemoryUtils.calculateTotalMemory(sc).toInt + 1024
+    val minCpu = 4
 
-  //   when(taskScheduler.sc).thenReturn(sc)
-  //   EasyMock.replay(taskScheduler)
+    val mesosOffers = new java.util.ArrayList[Offer]
+    val offer1 = createOffer("o1", "s1", minMem, minCpu)
+    mesosOffers.add(offer1)
 
-  //   // Enable shuffle service so it will require extra resources
-  //   sparkConf.set("spark.shuffle.service.enabled", "true")
-  //   sparkConf.set("spark.driver.host", "driverHost")
-  //   sparkConf.set("spark.driver.port", "1234")
+    val offer2 = createOffer("o2", "s1", minMem, 1);
 
-  //   val minMem = MemoryUtils.calculateTotalMemory(sc).toInt + 1024
-  //   val minCpu = 4
+    val backend = new CoarseMesosSchedulerBackend(taskScheduler, sc, "master") {
+      override val driverURL = "<stub>"
+    }
+    backend.driver = driver
+    backend.resourceOffers(driver, mesosOffers)
 
-  //   val mesosOffers = new java.util.ArrayList[Offer]
-  //   mesosOffers.add(createOffer("o1", "s1", minMem, minCpu))
+    verify(driver, times(1)).launchTasks(
+      Matchers.eq(Collections.singleton(offer1.getId)),
+      anyObject(),
+      anyObject[Filters])
 
-  //   when(
-  //     driver.launchTasks(
-  //       EasyMock.eq(Collections.singleton(mesosOffers.get(0).getId)),
-  //       EasyMock.anyObject(),
-  //       EasyMock.anyObject(classOf[Filters])
-  //     )
-  //   ).thenReturn(Status.valueOf(1)).once
+    // Simulate task killed, executor no longer running
+    val status = TaskStatus.newBuilder()
+      .setTaskId(TaskID.newBuilder().setValue("0").build())
+      .setSlaveId(SlaveID.newBuilder().setValue("s1").build())
+      .setState(TaskState.TASK_KILLED)
+      .build
 
-  //   val offer2 = createOffer("o2", "s1", minMem, 1);
+    backend.statusUpdate(driver, status)
+    assert(!backend.slaveIdsWithExecutors.contains("s1"))
 
-  //   when(
-  //     driver.launchTasks(
-  //       EasyMock.eq(Collections.singleton(offer2.getId)),
-  //       EasyMock.anyObject(),
-  //       EasyMock.anyObject(classOf[Filters])
-  //     )
-  //   ).thenReturn(Status.valueOf(1)).once
+    mesosOffers.clear()
+    mesosOffers.add(offer2)
+    backend.resourceOffers(driver, mesosOffers)
+    assert(backend.slaveIdsWithExecutors.contains("s1"))
 
-  //   when(driver.reviveOffers()).thenReturn(Status.valueOf(1)).once
+    verify(driver, times(1)).launchTasks(
+      Matchers.eq(Collections.singleton(offer2.getId)),
+      anyObject(),
+      anyObject[Filters])
 
-  //   EasyMock.replay(driver)
-
-  //   val backend = new CoarseMesosSchedulerBackend(taskScheduler, sc, "master")
-  //   backend.driver = driver
-  //   backend.resourceOffers(driver, mesosOffers)
-
-  //   // Simulate task killed, but executor is still running
-  //   val status = TaskStatus.newBuilder()
-  //     .setTaskId(TaskID.newBuilder().setValue("0").build())
-  //     .setSlaveId(SlaveID.newBuilder().setValue("s1").build())
-  //     .setState(TaskState.TASK_KILLED)
-  //     .build
-
-  //   backend.statusUpdate(driver, status)
-  //   assert(backend.slaveStatuses("s1").taskRunning.equals(false))
-  //   assert(backend.slaveStatuses("s1").executorRunning.equals(true))
-
-  //   mesosOffers.clear()
-  //   mesosOffers.add(offer2)
-  //   backend.resourceOffers(driver, mesosOffers)
-  //   assert(backend.slaveStatuses("s1").taskRunning.equals(true))
-  //   assert(backend.slaveStatuses("s1").executorRunning.equals(true))
-
-  //   EasyMock.verify(driver)
-  // }
+    verify(driver, times(1)).reviveOffers()
+  }
 }
