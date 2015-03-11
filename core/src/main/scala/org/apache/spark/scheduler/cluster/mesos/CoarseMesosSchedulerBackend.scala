@@ -256,8 +256,7 @@ private[spark] class CoarseMesosSchedulerBackend(
             Collections.singleton(offer.getId),  Collections.singletonList(task), filters)
         } else {
           // Filter it out
-          d.launchTasks(
-            Collections.singleton(offer.getId), Collections.emptyList[MesosTaskInfo](), filters)
+          driver.declineOffer(offer.getId)
         }
       }
     }
