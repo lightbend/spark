@@ -26,7 +26,7 @@ import org.apache.mesos.Protos.Value.Scalar
 import org.apache.mesos.Protos._
 import org.apache.mesos.SchedulerDriver
 import org.apache.spark.scheduler.TaskSchedulerImpl
-import org.apache.spark.scheduler.cluster.mesos.{ CoarseMesosSchedulerBackend, MemoryUtils }
+import org.apache.spark.scheduler.cluster.mesos.{ CoarseGrainedMesosSchedulerBackend, MemoryUtils }
 import org.apache.spark.{ LocalSparkContext, SparkConf, SparkEnv, SparkContext }
 import org.mockito.Matchers._
 import org.mockito.Mockito._
@@ -36,7 +36,7 @@ import org.scalatest.mock.MockitoSugar
 
 import scala.collection.mutable
 
-class CoarseMesosSchedulerBackendSuite extends FunSuite with LocalSparkContext with MockitoSugar {
+class CoarseGrainedMesosSchedulerBackendSuite extends FunSuite with LocalSparkContext with MockitoSugar {
 
   private def createOffer(offerId: String, slaveId: String, mem: Int, cpu: Int) = {
     val builder = Offer.newBuilder()
@@ -83,7 +83,7 @@ class CoarseMesosSchedulerBackendSuite extends FunSuite with LocalSparkContext w
 
     val taskID0 = TaskID.newBuilder().setValue("0").build()
 
-    val backend = new CoarseMesosSchedulerBackend(taskScheduler, sc, "master") {
+    val backend = new CoarseGrainedMesosSchedulerBackend(taskScheduler, sc, "master") {
       override val driverUrl = "<stub>"
     }
     backend.driver = driver
@@ -133,7 +133,7 @@ class CoarseMesosSchedulerBackendSuite extends FunSuite with LocalSparkContext w
 
     val offer2 = createOffer("o2", "s1", minMem, 1);
 
-    val backend = new CoarseMesosSchedulerBackend(taskScheduler, sc, "master") {
+    val backend = new CoarseGrainedMesosSchedulerBackend(taskScheduler, sc, "master") {
       override protected val driverUrl: String = "<stub>"
     }
     backend.driver = driver

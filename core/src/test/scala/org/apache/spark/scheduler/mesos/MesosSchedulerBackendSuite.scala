@@ -38,7 +38,7 @@ import org.apache.spark.executor.MesosExecutorBackend
 import org.apache.spark.scheduler.{LiveListenerBus, SparkListenerExecutorAdded,
   TaskDescription, TaskSchedulerImpl, WorkerOffer}
 import org.apache.spark.scheduler.cluster.ExecutorInfo
-import org.apache.spark.scheduler.cluster.mesos.{MesosSchedulerBackend, MemoryUtils}
+import org.apache.spark.scheduler.cluster.mesos.{FineGrainedMesosSchedulerBackend, MemoryUtils}
 
 class MesosSchedulerBackendSuite extends FunSuite with LocalSparkContext with MockitoSugar {
 
@@ -60,7 +60,7 @@ class MesosSchedulerBackendSuite extends FunSuite with LocalSparkContext with Mo
     val taskScheduler = mock[TaskSchedulerImpl]
     when(taskScheduler.CPUS_PER_TASK).thenReturn(2)
 
-    val mesosSchedulerBackend = new MesosSchedulerBackend(taskScheduler, sc, "master")
+    val mesosSchedulerBackend = new FineGrainedMesosSchedulerBackend(taskScheduler, sc, "master")
 
     // uri is null.
     val executorInfo = mesosSchedulerBackend.createExecutorInfo("test-id")
@@ -109,7 +109,7 @@ class MesosSchedulerBackendSuite extends FunSuite with LocalSparkContext with Mo
     mesosOffers.add(createOffer(2, minMem - 1, minCpu))
     mesosOffers.add(createOffer(3, minMem, minCpu))
 
-    val backend = new MesosSchedulerBackend(taskScheduler, sc, "master")
+    val backend = new FineGrainedMesosSchedulerBackend(taskScheduler, sc, "master")
 
     val expectedWorkerOffers = new ArrayBuffer[WorkerOffer](2)
     expectedWorkerOffers.append(new WorkerOffer(

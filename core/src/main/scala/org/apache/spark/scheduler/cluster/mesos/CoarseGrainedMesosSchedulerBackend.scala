@@ -43,10 +43,10 @@ import org.apache.spark.util.{Utils, AkkaUtils}
  * CoarseGrainedSchedulerBackend mechanism. This class is useful for lower and more predictable
  * latency.
  *
- * Unfortunately this has a bit of duplication from MesosSchedulerBackend, but it seems hard to
+ * Unfortunately this has a bit of duplication from FineGrainedMesosSchedulerBackend, but it seems hard to
  * remove this.
  */
-private[spark] class CoarseMesosSchedulerBackend(
+private[spark] class CoarseGrainedMesosSchedulerBackend(
     scheduler: TaskSchedulerImpl,
     sc: SparkContext,
     master: String)
@@ -108,10 +108,10 @@ private[spark] class CoarseMesosSchedulerBackend(
     super.start()
 
     stateLock.synchronized {
-      new Thread("CoarseMesosSchedulerBackend driver") {
+      new Thread("CoarseGrainedMesosSchedulerBackend driver") {
         setDaemon(true)
         override def run() {
-          val scheduler = CoarseMesosSchedulerBackend.this
+          val scheduler = CoarseGrainedMesosSchedulerBackend.this
           val fwInfo = FrameworkInfo.newBuilder().setUser(sc.sparkUser).setName(sc.appName).build()
           driver = new MesosSchedulerDriver(scheduler, fwInfo, master)
           try {

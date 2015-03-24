@@ -41,7 +41,7 @@ import org.apache.spark.util.Utils
  * separate Mesos task, allowing multiple applications to share cluster nodes both in space (tasks
  * from multiple apps can run on different cores) and in time (a core can switch ownership).
  */
-private[spark] class MesosSchedulerBackend(
+private[spark] class FineGrainedMesosSchedulerBackend(
     scheduler: TaskSchedulerImpl,
     sc: SparkContext,
     master: String)
@@ -74,10 +74,10 @@ private[spark] class MesosSchedulerBackend(
     synchronized {
       classLoader = Thread.currentThread.getContextClassLoader
 
-      new Thread("MesosSchedulerBackend driver") {
+      new Thread("FineGrainedMesosSchedulerBackend driver") {
         setDaemon(true)
         override def run() {
-          val scheduler = MesosSchedulerBackend.this
+          val scheduler = FineGrainedMesosSchedulerBackend.this
           val fwInfo = FrameworkInfo.newBuilder().setUser(sc.sparkUser).setName(sc.appName).build()
           driver = new MesosSchedulerDriver(scheduler, fwInfo, master)
           try {
