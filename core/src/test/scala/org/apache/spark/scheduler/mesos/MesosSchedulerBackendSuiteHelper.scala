@@ -75,11 +75,12 @@ trait MesosSchedulerBackendSuiteHelper {
   }
 
   // Simulate task killed, executor no longer running
-  private def makeKilledTaskStatus = TaskStatus.newBuilder()
-    .setTaskId(TaskID.newBuilder().setValue("0").build())
-    .setSlaveId(SlaveID.newBuilder().setValue("s1").build())
-    .setState(TaskState.TASK_KILLED)
-    .build
+  private def makeKilledTaskStatus(taskId: String, slaveId: String) =
+    TaskStatus.newBuilder()
+      .setTaskId(TaskID.newBuilder().setValue(taskId).build())
+      .setSlaveId(SlaveID.newBuilder().setValue(slaveId).build())
+      .setState(TaskState.TASK_KILLED)
+      .build
 
 
   protected def makeTestMesosSchedulerBackend(
@@ -110,7 +111,7 @@ trait MesosSchedulerBackendSuiteHelper {
     assert(backend.doKillExecutors(Seq("s1/0")))
     verify(driver, times(1)).killTask(taskID0)
     // Must invoke the status update explicitly here.
-    backend.statusUpdate(driver, makeKilledTaskStatus)
+    backend.statusUpdate(driver, makeKilledTaskStatus("0", "s1"))
 
     // Verify we don't have any executors.
     assert(backend.slaveIdsWithExecutors.size === 0)
@@ -163,7 +164,7 @@ trait MesosSchedulerBackendSuiteHelper {
       anyObject[Filters])
     assert(backend.slaveIdsWithExecutors.contains("s1"))
 
-    backend.statusUpdate(driver, makeKilledTaskStatus)
+    backend.statusUpdate(driver, makeKilledTaskStatus("0", "s1"))
     assert(!backend.slaveIdsWithExecutors.contains("s1"))
 
     mesosOffers.clear()
