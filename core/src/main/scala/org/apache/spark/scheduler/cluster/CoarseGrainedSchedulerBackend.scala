@@ -75,7 +75,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     override protected def log = CoarseGrainedSchedulerBackend.this.log
     private val addressToExecutorId = new HashMap[Address, String]
 
-    override def preStart() {
+    override def preStart(): Unit = {
       // Listen for remote client disconnection events, since they don't go through Akka's watch()
       context.system.eventStream.subscribe(self, classOf[RemotingLifecycleEvent])
 
@@ -163,21 +163,21 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     }
 
     // Make fake resource offers on all executors
-    def makeOffers() {
+    def makeOffers(): Unit = {
       launchTasks(scheduler.resourceOffers(executorDataMap.map { case (id, executorData) =>
         new WorkerOffer(id, executorData.executorHost, executorData.freeCores)
       }.toSeq))
     }
 
     // Make fake resource offers on just one executor
-    def makeOffers(executorId: String) {
+    def makeOffers(executorId: String): Unit = {
       val executorData = executorDataMap(executorId)
       launchTasks(scheduler.resourceOffers(
         Seq(new WorkerOffer(executorId, executorData.executorHost, executorData.freeCores))))
     }
 
     // Launch tasks returned by a set of resource offers
-    def launchTasks(tasks: Seq[Seq[TaskDescription]]) {
+    def launchTasks(tasks: Seq[Seq[TaskDescription]]): Unit = {
       for (task <- tasks.flatten) {
         val ser = SparkEnv.get.closureSerializer.newInstance()
         val serializedTask = ser.serialize(task)
@@ -227,7 +227,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
   var driverActor: ActorRef = null
   val taskIdsOnSlave = new HashMap[String, HashSet[String]]
 
-  override def start() {
+  override def start(): Unit = {
     val properties = new ArrayBuffer[(String, String)]
     for ((key, value) <- scheduler.sc.conf.getAll) {
       if (key.startsWith("spark.")) {
@@ -239,7 +239,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
       Props(new DriverActor(properties)), name = CoarseGrainedSchedulerBackend.ACTOR_NAME)
   }
 
-  def stopExecutors() {
+  def stopExecutors(): Unit = {
     try {
       if (driverActor != null) {
         logInfo("Shutting down all executors")
@@ -252,7 +252,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     }
   }
 
-  override def stop() {
+  override def stop(): Unit = {
     stopExecutors()
     try {
       if (driverActor != null) {
@@ -265,11 +265,11 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     }
   }
 
-  override def reviveOffers() {
+  override def reviveOffers(): Unit = {
     driverActor ! ReviveOffers
   }
 
-  override def killTask(taskId: Long, executorId: String, interruptThread: Boolean) {
+  override def killTask(taskId: Long, executorId: String, interruptThread: Boolean): Unit = {
     driverActor ! KillTask(taskId, executorId, interruptThread)
   }
 
@@ -363,6 +363,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
    */
   final override def killExecutors(executorIds: Seq[String]): Boolean = synchronized {
     logInfo(s"Requesting to kill executor(s) ${executorIds.mkString(", ")}")
+    println(s"killExecutors: ids = ${executorIds}")
     val filteredExecutorIds = new ArrayBuffer[String]
     executorIds.foreach { id =>
       if (executorDataMap.contains(id)) {
