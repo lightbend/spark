@@ -122,7 +122,7 @@ private[spark] class FineGrainedMesosSchedulerBackend(
     execArgs
   }
 
-  /** TODO: is wrapping in the separate class loader necessary? */
+  /** TODO: Is wrapping in the separate class loader necessary? */
   override def registered(d: SchedulerDriver, frameworkId: FrameworkID, masterInfo: MasterInfo): Unit = {
     inClassLoader() {
       doRegistered(d: SchedulerDriver, frameworkId: FrameworkID, masterInfo: MasterInfo)
