@@ -55,7 +55,7 @@ trait CommonMesosSchedulerBackend extends SchedulerBackend {
   def doKillExecutors(executorIds: Seq[String]): Boolean
 
   val scheduler: TaskSchedulerImpl
-  val sc: SparkContext
+  val sparkContext: SparkContext
   val master: String
 
   def executorBackendName: String = this.getClass.getName
@@ -112,7 +112,8 @@ trait CommonMesosSchedulerBackend extends SchedulerBackend {
         override def run() {
           // i.e., val scheduler = CoarseGrainedMesosSchedulerBackend.this
           val scheduler = self
-          val fwInfo = FrameworkInfo.newBuilder().setUser(sc.sparkUser).setName(sc.appName).build()
+          val fwInfo = FrameworkInfo.newBuilder().
+            setUser(sparkContext.sparkUser).setName(sparkContext.appName).build()
           driver = new MesosSchedulerDriver(scheduler, fwInfo, master)
           try {
             val ret = driver.run()
@@ -136,21 +137,21 @@ trait CommonMesosSchedulerBackend extends SchedulerBackend {
   }
 
   def createCommandInfo(extraCommandArguments: String): CommandInfo = {
-    val executorSparkHome = sc.conf.getOption("spark.mesos.executor.home")
-      .orElse(sc.getSparkHome())
+    val executorSparkHome = sparkContext.conf.getOption("spark.mesos.executor.home")
+      .orElse(sparkContext.getSparkHome())
       .getOrElse {
         throw new SparkException("Executor Spark home `spark.mesos.executor.home` is not set!")
       }
     val environment = Environment.newBuilder()
-    sc.conf.getOption("spark.executor.extraClassPath").foreach { cp =>
+    sparkContext.conf.getOption("spark.executor.extraClassPath").foreach { cp =>
       environment.addVariables(
         Environment.Variable.newBuilder().setName("SPARK_CLASSPATH").setValue(cp).build())
     }
-    val extraJavaOpts = sc.conf.get("spark.executor.extraJavaOptions", "")
+    val extraJavaOpts = sparkContext.conf.get("spark.executor.extraJavaOptions", "")
 
     // Set the environment variable through a command prefix
     // to append to the existing value of the variable
-    val prefixEnv = sc.conf.getOption("spark.executor.extraLibraryPath").map { p =>
+    val prefixEnv = sparkContext.conf.getOption("spark.executor.extraLibraryPath").map { p =>
       Utils.libraryPathEnvPrefix(Seq(p))
     }.getOrElse("")
 
@@ -160,7 +161,7 @@ trait CommonMesosSchedulerBackend extends SchedulerBackend {
         .setValue(extraJavaOpts)
         .build())
 
-    sc.executorEnvs.foreach { case (key, value) =>
+    sparkContext.executorEnvs.foreach { case (key, value) =>
       environment.addVariables(Environment.Variable.newBuilder()
         .setName(key)
         .setValue(value)
@@ -169,7 +170,7 @@ trait CommonMesosSchedulerBackend extends SchedulerBackend {
     val command = CommandInfo.newBuilder()
       .setEnvironment(environment)
 
-    val uri = sc.conf.get("spark.executor.uri", null)
+    val uri = sparkContext.conf.get("spark.executor.uri", null)
     if (uri == null) {
       val executorPath= new File(executorSparkHome, "./bin/spark-class").getCanonicalPath
       command.setValue(

@@ -43,14 +43,14 @@ import org.apache.spark.util.{Utils, AkkaUtils}
  * CoarseGrainedSchedulerBackend mechanism. This class is useful for lower and more predictable
  * latency.
  *
- * Unfortunately this has a bit of duplication from FineGrainedMesosSchedulerBackend, but it seems hard to
- * remove this.
+ * Unfortunately, there is some duplication with FineGrainedMesosSchedulerBackend
+ * that is hard to remove.
  */
 private[spark] class CoarseGrainedMesosSchedulerBackend(
     val scheduler: TaskSchedulerImpl,
-    val sc: SparkContext,
+    val sparkContext: SparkContext,
     val master: String)
-  extends CoarseGrainedSchedulerBackend(scheduler, sc.env.actorSystem)
+  extends CoarseGrainedSchedulerBackend(scheduler, sparkContext.env.actorSystem)
   with CommonMesosSchedulerBackend
   with MScheduler
   with Logging {
@@ -111,7 +111,7 @@ private[spark] class CoarseGrainedMesosSchedulerBackend(
 
   protected def driverUrl: String = {
     AkkaUtils.address(
-      AkkaUtils.protocol(sc.env.actorSystem),
+      AkkaUtils.protocol(sparkContext.env.actorSystem),
       SparkEnv.driverActorSystemName,
       conf.get("spark.driver.host"),
       conf.get("spark.driver.port"),
@@ -136,7 +136,7 @@ private[spark] class CoarseGrainedMesosSchedulerBackend(
         val cpus = getResource(offer.getResourcesList, "cpus").toInt
         if (taskIdToSlaveId.size < executorLimit &&
             totalCoresAcquired < maxCores &&
-            mem >= MemoryUtils.calculateTotalMemory(sc) &&
+            mem >= MemoryUtils.calculateTotalMemory(sparkContext) &&
             cpus >= 1 &&
             failuresBySlaveId.getOrElse(slaveId, 0) < MAX_SLAVE_FAILURES &&
             !slaveIdsWithExecutors.contains(slaveId)) {
@@ -154,7 +154,7 @@ private[spark] class CoarseGrainedMesosSchedulerBackend(
             .setName("Task " + taskId)
             .addResources(createResource("cpus", cpusToUse))
             .addResources(createResource("mem",
-              MemoryUtils.calculateTotalMemory(sc)))
+              MemoryUtils.calculateTotalMemory(sparkContext)))
             .build()
           d.launchTasks(
             Collections.singleton(offer.getId),  Collections.singletonList(task), filters)

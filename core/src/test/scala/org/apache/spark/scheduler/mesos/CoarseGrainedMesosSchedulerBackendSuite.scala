@@ -43,18 +43,29 @@ class CoarseGrainedMesosSchedulerBackendSuite
   with MockitoSugar {
 
   protected def makeTestMesosSchedulerBackend(
-      taskScheduler: TaskSchedulerImpl,
-      sc: SparkContext): CoarseGrainedMesosSchedulerBackend = {
-    new CoarseGrainedMesosSchedulerBackend(taskScheduler, sc, "master") {
+      taskScheduler: TaskSchedulerImpl): CoarseGrainedMesosSchedulerBackend = {
+    new CoarseGrainedMesosSchedulerBackend(taskScheduler, taskScheduler.sc, "master") {
       override val driverUrl = "<stub>"
     }
   }
 
-  test("mesos supports killing and limiting executors") {
-    killAndLimitExecutors()
+  test("When Mesos offers resources, a Mesos executor is created.") {
+    makeMesosExecutorsTest
+  }
+
+  test("When a Mesos executor is killed, the maximum number of allowed Mesos executors is deprecated by one") {
+    killMesosExecutorDeprecateByOneTest()
+  }
+
+  test("The maximum number of allowed Mesos executors can be increased by explicitly requesting new Mesos executors") {
+    increaseAllowedMesosExecutorsTest()
+  }
+
+  test("Losing a slave and its Mesos executor doesn't change the maximum allowed number of Mesos executors") {
+    slaveLostDoesntChangeMaxAllowedMesosExecutorsTest()
   }
 
   test("mesos supports killing and relaunching tasks with executors") {
-    killAndRelaunchTasks()
+    killAndRelaunchTasksTest()
   }
 }
