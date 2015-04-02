@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.spark.scheduler.mesos
+package org.apache.spark.scheduler.cluster.mesos
 
 import java.nio.ByteBuffer
 

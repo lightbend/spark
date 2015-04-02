@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.spark.scheduler.mesos
+package org.apache.spark.scheduler.cluster.mesos
 
 import java.util
 import java.util.Collections
@@ -26,7 +26,6 @@ import org.apache.mesos.Protos.Value.Scalar
 import org.apache.mesos.Protos._
 import org.apache.mesos.SchedulerDriver
 import org.apache.spark.scheduler.TaskSchedulerImpl
-import org.apache.spark.scheduler.cluster.mesos.{ CoarseGrainedMesosSchedulerBackend, MemoryUtils }
 import org.apache.spark.{ LocalSparkContext, SparkConf, SparkEnv, SparkContext }
 import org.mockito.Matchers._
 import org.mockito.Mockito._

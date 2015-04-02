@@ -62,7 +62,7 @@ private[spark] class FineGrainedMesosSchedulerBackend(
 
   // ==== Definitions for start():
 
-  protected val backendName: String = "FineGrainedMesosSchedulerBackend"
+  protected val executorBackend = classOf[MesosExecutorBackend]
 
   // Initialize the classLoader.
   protected def preStart(): Unit = {

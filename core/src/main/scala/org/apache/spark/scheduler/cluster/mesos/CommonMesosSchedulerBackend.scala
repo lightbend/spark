@@ -58,9 +58,6 @@ trait CommonMesosSchedulerBackend extends SchedulerBackend {
   val sparkContext: SparkContext
   val master: String
 
-  def executorBackendName: String = this.getClass.getName
-  def executorSimpleBackendName: String = this.getClass.getSimpleName
-
   /** Driver for talking to Mesos */
   var driver: SchedulerDriver = null
 
@@ -72,11 +69,14 @@ trait CommonMesosSchedulerBackend extends SchedulerBackend {
    */
   def getExecutorLimit = executorLimit
 
-  private[spark] val slaveIdsWithExecutors = MutableHashSet.empty[String]
+  protected val executorBackend: Class[_]
 
-  private[spark] val taskIdToSlaveId = HashBiMap.create[Long, String]
+  private[mesos] val taskIdToSlaveId = HashBiMap.create[Long, String]
 
-  var nextMesosTaskId = 0
+  private[mesos] val slaveIdsWithExecutors = MutableHashSet.empty[String]
+
+  private def executorBackendName: String = executorBackend.getName
+  private def executorSimpleBackendName: String = executorBackend.getSimpleName
 
   @volatile var appId: String = _
 
@@ -173,16 +173,14 @@ trait CommonMesosSchedulerBackend extends SchedulerBackend {
     val uri = sparkContext.conf.get("spark.executor.uri", null)
     if (uri == null) {
       val executorPath= new File(executorSparkHome, "./bin/spark-class").getCanonicalPath
-      command.setValue(
-        "%s \"%s\" %s %s"
-          .format(prefixEnv, executorPath, executorBackendName, extraCommandArguments))
+      command.setValue("%s \"%s\" %s %s".format(
+        prefixEnv, executorPath, executorBackendName, extraCommandArguments))
     } else {
       // Grab everything to the first '.'. We'll use that and '*' to
       // glob the directory "correctly".
       val basename = uri.split('/').last.split('.').head
-      command.setValue(
-        s"cd $basename*; $prefixEnv " +
-         "./bin/spark-class $executorBackendName" + extraCommandArguments)
+      command.setValue("cd %s*; %s \"%s\" %s %s".format(
+        basename, prefixEnv, "./bin/spark-class", executorBackendName, extraCommandArguments))
       command.addUris(CommandInfo.URI.newBuilder().setValue(uri))
     }
     command.build()

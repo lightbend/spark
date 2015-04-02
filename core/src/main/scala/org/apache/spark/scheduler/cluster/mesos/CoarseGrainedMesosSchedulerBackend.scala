@@ -70,7 +70,11 @@ private[spark] class CoarseGrainedMesosSchedulerBackend(
 
   private[mesos] val pendingRemovedSlaveIds = MutableHashSet.empty[String]
 
+  protected val executorBackend = this.getClass
+
   val extraCoresPerSlave = conf.getInt("spark.mesos.extra.cores", 0)
+
+  var nextMesosTaskId = 0
 
   /** Return a new task id for coarse-grained mode. */
   def newMesosTaskId(): Int = {

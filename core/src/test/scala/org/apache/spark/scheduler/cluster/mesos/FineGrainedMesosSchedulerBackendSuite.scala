@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.spark.scheduler.mesos
+package org.apache.spark.scheduler.cluster.mesos
 
 import java.nio.ByteBuffer
 import java.util
@@ -38,11 +38,10 @@ import org.apache.spark.executor.MesosExecutorBackend
 import org.apache.spark.scheduler.{LiveListenerBus, SparkListenerExecutorAdded,
   TaskDescription, TaskSchedulerImpl, WorkerOffer}
 import org.apache.spark.scheduler.cluster.ExecutorInfo
-import org.apache.spark.scheduler.cluster.mesos.{FineGrainedMesosSchedulerBackend, MemoryUtils}
 
 class FineGrainedMesosSchedulerBackendSuite extends FunSuite with LocalSparkContext with MockitoSugar {
 
-  test("check spark-class location correctly") {
+  test("The spark-class location is correctly computed") {
     val conf = new SparkConf
     conf.set("spark.mesos.executor.home" , "/mesos-home")
 
@@ -64,15 +63,15 @@ class FineGrainedMesosSchedulerBackendSuite extends FunSuite with LocalSparkCont
 
     // uri is null.
     val executorInfo = mesosSchedulerBackend.createExecutorInfo("test-id")
-    assert(executorInfo.getCommand.getValue === s" /mesos-home/bin/spark-class ${classOf[MesosExecutorBackend].getName}")
+    assert(executorInfo.getCommand.getValue === s""" "/mesos-home/bin/spark-class" ${classOf[MesosExecutorBackend].getName} """)
 
     // uri exists.
     conf.set("spark.executor.uri", "hdfs:///test-app-1.0.0.tgz")
     val executorInfo1 = mesosSchedulerBackend.createExecutorInfo("test-id")
-    assert(executorInfo1.getCommand.getValue === s"cd test-app-1*;  ./bin/spark-class ${classOf[MesosExecutorBackend].getName}")
+    assert(executorInfo1.getCommand.getValue === s"""cd test-app-1*;  "./bin/spark-class" ${classOf[MesosExecutorBackend].getName} """)
   }
 
-  test("mesos resource offers result in launching tasks") {
+  test("When Mesos resource offers are received, tasks are launched") {
     def createOffer(id: Int, mem: Int, cpu: Int) = {
       val builder = Offer.newBuilder()
       builder.addResourcesBuilder()
