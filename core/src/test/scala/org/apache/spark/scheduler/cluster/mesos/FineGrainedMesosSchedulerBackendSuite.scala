@@ -40,7 +40,7 @@ import org.apache.spark.scheduler.{LiveListenerBus, SparkListenerExecutorAdded,
 import org.apache.spark.scheduler.cluster.ExecutorInfo
 import org.apache.spark.scheduler.cluster.mesos.{FineGrainedMesosSchedulerBackend, MemoryUtils}
 
-class MesosSchedulerBackendSuite extends FunSuite with LocalSparkContext with MockitoSugar {
+class FineGrainedMesosSchedulerBackendSuite extends FunSuite with LocalSparkContext with MockitoSugar {
 
   test("check spark-class location correctly") {
     val conf = new SparkConf
