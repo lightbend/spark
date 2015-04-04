@@ -48,8 +48,125 @@ class CoarseGrainedMesosSchedulerBackendSuite
     }
   }
 
+  val (taskIDVal1, slaveIDVal1) = ("0", "s1")
+  val (taskIDVal2, slaveIDVal2) = ("1", "s2")
+
+  def makeMesosExecutorsTest(): (CommonMesosSchedulerBackend, SchedulerDriver) = {
+    val (backend, driver) = makeBackendAndDriver
+
+    val (minMem, minCPU) = minMemMinCPU(backend.sparkContext)
+
+    val mesosOffers1 = makeOffersList(makeOffer(taskIDVal1, slaveIDVal1, minMem, minCPU))
+
+    backend.resourceOffers(driver, mesosOffers1)
+    verify(driver, times(1)).launchTasks(
+        Matchers.eq(Collections.singleton(mesosOffers1.get(0).getId)),
+        any[util.Collection[TaskInfo]],
+        any[Filters])
+
+    // Verify we have one executor and the executor limit is 1.
+    assert(backend.slaveIdsWithExecutors.size === 1)
+    assert(backend.getExecutorLimit >= 1)
+
+    (backend, driver)  // Return so this test can be embedded in others.
+  }
+
+  def killMesosExecutorDeprecateByOneTest(): (CommonMesosSchedulerBackend, SchedulerDriver) = {
+    val (backend, driver) = makeMesosExecutorsTest()
+
+    // Calling doKillExecutors should invoke driver.killTask.
+    val taskID1 = makeTaskID(taskIDVal1)
+    assert(backend.doKillExecutors(Seq(s"$slaveIDVal1/$taskIDVal1")))
+    verify(driver, times(1)).killTask(taskID1)
+    // Must invoke the status update explicitly here.
+    // TODO: can we mock other parts of the API so this can be called automatically?
+    backend.statusUpdate(driver, makeKilledTaskStatus(taskIDVal1, slaveIDVal1))
+
+    // Verify we don't have any executors.
+    assert(backend.slaveIdsWithExecutors.size === 0)
+    // Verify that the executor limit is now 0.
+    assert(backend.getExecutorLimit === 0)
+
+    val (minMem, minCPU) = minMemMinCPU(backend.sparkContext)
+    val mesosOffers2 = makeOffersList(makeOffer(taskIDVal2, slaveIDVal2, minMem, minCPU))
+    backend.resourceOffers(driver, mesosOffers2)
+
+    verify(driver, times(1))
+      .declineOffer(makeOfferID(taskIDVal2))
+
+    // Verify we didn't launch any new executor
+    assert(backend.slaveIdsWithExecutors.size === 0)
+    assert(backend.getExecutorLimit === 0)
+
+    (backend, driver)  // Return so this test can be embedded in others.
+  }
+
+  def increaseAllowedMesosExecutorsTest(): (CommonMesosSchedulerBackend, SchedulerDriver) = {
+    val (backend, driver) = killMesosExecutorDeprecateByOneTest()
+
+    val (minMem, minCPU) = minMemMinCPU(backend.sparkContext)
+    val mesosOffers2 = makeOffersList(makeOffer(taskIDVal2, slaveIDVal2, minMem, minCPU))
+
+    // Now allow one more executor:
+    backend.requestExecutors(1)
+    backend.resourceOffers(driver, mesosOffers2)
+    verify(driver, times(1)).launchTasks(
+        Matchers.eq(Collections.singleton(mesosOffers2.get(0).getId)),
+        any[util.Collection[TaskInfo]],
+        any[Filters])
+
+    assert(backend.slaveIdsWithExecutors.size === 1)
+    assert(backend.getExecutorLimit >= 1)
+
+    (backend, driver)  // Return so this test can be embedded in others.
+  }
+
+  def slaveLostDoesntChangeMaxAllowedMesosExecutorsTest(): Unit = {
+    val (backend, driver) = increaseAllowedMesosExecutorsTest()
+
+    backend.slaveLost(driver, makeSlaveID(slaveIDVal2))
+    assert(backend.slaveIdsWithExecutors.size === 0)
+    assert(backend.getExecutorLimit >= 1)
+  }
+
+  def killAndRelaunchTasksTest(): Unit = {
+    val (backend, driver) = makeBackendAndDriver
+    val (minMem, minCPU) = minMemMinCPU(backend.sparkContext, 1024)
+    val offer1 = makeOffer(taskIDVal1, slaveIDVal1, minMem, minCPU)
+    val mesosOffers = makeOffersList(offer1)
+
+    backend.resourceOffers(driver, mesosOffers)
+
+    verify(driver, times(1)).launchTasks(
+      Matchers.eq(Collections.singleton(offer1.getId)),
+      anyObject(),
+      anyObject[Filters])
+    assert(backend.slaveIdsWithExecutors.contains(slaveIDVal1))
+
+    backend.statusUpdate(driver, makeKilledTaskStatus(taskIDVal1, slaveIDVal1))
+    assert(!backend.slaveIdsWithExecutors.contains(slaveIDVal1))
+    assert(backend.slaveIdsWithExecutors.size === 0)
+    assert(backend.getExecutorLimit >= 1)
+
+    val offer2 = makeOffer(taskIDVal2, slaveIDVal2, minMem, 1)
+    mesosOffers.clear()
+    mesosOffers.add(offer2)
+    backend.resourceOffers(driver, mesosOffers)
+    assert(!backend.slaveIdsWithExecutors.contains(slaveIDVal1))
+    assert( backend.slaveIdsWithExecutors.contains(slaveIDVal2))
+    assert(backend.slaveIdsWithExecutors.size === 1)
+    assert(backend.getExecutorLimit >= 1)
+
+    verify(driver, times(1)).launchTasks(
+      Matchers.eq(Collections.singleton(offer2.getId)),
+      anyObject(),
+      anyObject[Filters])
+
+    verify(driver, times(1)).reviveOffers()
+  }
+
   test("When Mesos offers resources, a Mesos executor is created.") {
-    makeMesosExecutorsTest
+    makeMesosExecutorsTest()
   }
 
   test("When a Mesos executor is killed, the maximum number of allowed Mesos executors is deprecated by one") {

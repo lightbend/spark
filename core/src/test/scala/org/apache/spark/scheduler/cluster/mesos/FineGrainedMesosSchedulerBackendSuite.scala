@@ -87,8 +87,10 @@ class FineGrainedMesosSchedulerBackendSuite
 
   protected def offerResourcesHelper():
       (CommonMesosSchedulerBackend, SchedulerDriver, ArgumentCaptor[util.Collection[TaskInfo]], JArrayList[Offer]) = {
+
     val (backend, driver) = makeBackendAndDriver()
     val taskScheduler = backend.scheduler
+    when(taskScheduler.CPUS_PER_TASK).thenReturn(2)
 
     val sc = taskScheduler.sc  // a mocked object
     when(sc.getSparkHome()).thenReturn(Option("/path"))
@@ -111,9 +113,9 @@ class FineGrainedMesosSchedulerBackendSuite
     ))
 
     // The mock taskScheduler will only accept the first offer.
-    val taskDesc = new TaskDescription(1L, 0, "s1", "n1", 0, ByteBuffer.wrap(new Array[Byte](0)))
-    when(taskScheduler.resourceOffers(expectedWorkerOffers)).thenReturn(Seq(Seq(taskDesc)))
-    when(taskScheduler.CPUS_PER_TASK).thenReturn(2)
+    val expectedTaskDescriptions = Seq(new TaskDescription(1L, 0, "s1", "n1", 0, ByteBuffer.wrap(new Array[Byte](0))))
+
+    when(taskScheduler.resourceOffers(expectedWorkerOffers)).thenReturn(Seq(expectedTaskDescriptions))
 
     val capture = ArgumentCaptor.forClass(classOf[util.Collection[TaskInfo]])
     when(
