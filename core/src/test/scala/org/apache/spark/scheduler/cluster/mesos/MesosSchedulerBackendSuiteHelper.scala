@@ -19,7 +19,7 @@ package org.apache.spark.scheduler.cluster.mesos
 
 import java.util
 import java.util.Collections
-
+import java.util.{ ArrayList => JArrayList }
 import akka.actor.ActorSystem
 import com.typesafe.config.Config
 import org.apache.mesos.Protos.Value.Scalar
@@ -55,8 +55,8 @@ trait MesosSchedulerBackendSuiteHelper {
       .setSlaveId(SlaveID.newBuilder().setValue(slaveId)).setHostname(s"host_$slaveId").build()
   }
 
-  protected def makeOffersList(offers: Offer*): java.util.ArrayList[Offer] = {
-    val mesosOffers = new java.util.ArrayList[Offer]
+  protected def makeOffersList(offers: Offer*): JArrayList[Offer] = {
+    val mesosOffers = new JArrayList[Offer]
     for (o <- offers) mesosOffers.add(o)
     mesosOffers
   }

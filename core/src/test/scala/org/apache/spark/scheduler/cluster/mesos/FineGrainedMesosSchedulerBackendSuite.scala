@@ -20,6 +20,7 @@ package org.apache.spark.scheduler.cluster.mesos
 import java.nio.ByteBuffer
 import java.util
 import java.util.Collections
+import java.util.{ ArrayList => JArrayList }
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
@@ -50,6 +51,16 @@ class FineGrainedMesosSchedulerBackendSuite
     new FineGrainedMesosSchedulerBackend(taskScheduler, taskScheduler.sc, "master")
   }
 
+  def makeTestOffers(sc: SparkContext): (Offer, Offer, Offer, Offer) = {
+    val (minMem, minCpu) = minMemMinCPU(sc)
+    val goodOffer1 = makeOffer("o1", "s1", minMem,     minCpu)
+    val badOffer1  = makeOffer("o2", "s2", minMem - 1, minCpu)      // memory will be too small.
+    val goodOffer2 = makeOffer("o3", "s3", minMem,     minCpu)
+    val badOffer2  = makeOffer("o4", "s4", minMem,     minCpu - 1)  // CPUs will be too small.
+    (goodOffer1, badOffer1, goodOffer2, badOffer2)
+  }
+
+
   test("The spark-class location is correctly computed") {
     val sc = makeMockSparkContext()
     sc.conf.set("spark.mesos.executor.home" , "/mesos-home")
@@ -74,8 +85,8 @@ class FineGrainedMesosSchedulerBackendSuite
     assert(executorInfo1.getCommand.getValue === s"""cd test-app-1*;  "./bin/spark-class" ${classOf[MesosExecutorBackend].getName} """)
   }
 
-  test("When Mesos resource offers are received, tasks are launched") {
-
+  protected def offerResourcesHelper():
+      (CommonMesosSchedulerBackend, SchedulerDriver, ArgumentCaptor[util.Collection[TaskInfo]], JArrayList[Offer]) = {
     val (backend, driver) = makeBackendAndDriver()
     val taskScheduler = backend.scheduler
 
@@ -84,24 +95,22 @@ class FineGrainedMesosSchedulerBackendSuite
     sc.listenerBus.post(
       SparkListenerExecutorAdded(anyLong, "s1", new ExecutorInfo("host_s1", 2, Map.empty)))
 
-    val (minMem, minCpu) = minMemMinCPU(sc)
-
-    val mesosOffers = makeOffersList(
-      makeOffer("o1", "s1", minMem,     minCpu),
-      makeOffer("o2", "s2", minMem - 1, minCpu),
-      makeOffer("o3", "s3", minMem,     minCpu))
+    val (goodOffer1, badOffer1, goodOffer2, badOffer2) = makeTestOffers(sc)
+    val mesosOffers = makeOffersList(goodOffer1, badOffer1, goodOffer2, badOffer2)
 
     val expectedWorkerOffers = new ArrayBuffer[WorkerOffer](2)
     expectedWorkerOffers.append(new WorkerOffer(
-      mesosOffers.get(0).getSlaveId.getValue,
-      mesosOffers.get(0).getHostname,
+      goodOffer1.getSlaveId.getValue,
+      goodOffer1.getHostname,
       2
     ))
     expectedWorkerOffers.append(new WorkerOffer(
-      mesosOffers.get(2).getSlaveId.getValue,
-      mesosOffers.get(2).getHostname,
+      goodOffer2.getSlaveId.getValue,
+      goodOffer2.getHostname,
       2
     ))
+
+    // The mock taskScheduler will only accept the first offer.
     val taskDesc = new TaskDescription(1L, 0, "s1", "n1", 0, ByteBuffer.wrap(new Array[Byte](0)))
     when(taskScheduler.resourceOffers(expectedWorkerOffers)).thenReturn(Seq(Seq(taskDesc)))
     when(taskScheduler.CPUS_PER_TASK).thenReturn(2)
@@ -109,23 +118,31 @@ class FineGrainedMesosSchedulerBackendSuite
     val capture = ArgumentCaptor.forClass(classOf[util.Collection[TaskInfo]])
     when(
       driver.launchTasks(
-        Matchers.eq(Collections.singleton(mesosOffers.get(0).getId)),
+        Matchers.eq(Collections.singleton(goodOffer1.getId)),
         capture.capture(),
         any(classOf[Filters])
       )
     ).thenReturn(Status.valueOf(1))
-    when(driver.declineOffer(mesosOffers.get(1).getId)).thenReturn(Status.valueOf(1))
-    when(driver.declineOffer(mesosOffers.get(2).getId)).thenReturn(Status.valueOf(1))
+    when(driver.declineOffer(badOffer1.getId)).thenReturn(Status.valueOf(1))
+    when(driver.declineOffer(goodOffer2.getId)).thenReturn(Status.valueOf(1))
+    when(driver.declineOffer(badOffer2.getId)).thenReturn(Status.valueOf(1))
 
     backend.resourceOffers(driver, mesosOffers)
 
+    (backend, driver, capture, mesosOffers)
+  }
+
+  test("When acceptable Mesos resource offers are received, tasks are launched for for them") {
+
+    val (backend, driver, capture, mesosOffers) = offerResourcesHelper()
+    val goodOffer1 = mesosOffers.get(0)
+
     verify(driver, times(1)).launchTasks(
-      Matchers.eq(Collections.singleton(mesosOffers.get(0).getId)),
+      Matchers.eq(Collections.singleton(goodOffer1.getId)),
       capture.capture(),
       any(classOf[Filters])
     )
-    verify(driver, times(1)).declineOffer(mesosOffers.get(1).getId)
-    verify(driver, times(1)).declineOffer(mesosOffers.get(2).getId)
+
     assert(capture.getValue.size() === 1)
     val taskInfo = capture.getValue.iterator().next()
     assert(taskInfo.getName === "n1")
@@ -135,16 +152,33 @@ class FineGrainedMesosSchedulerBackendSuite
     val delta = 0.00001
     assert(actual >= - delta && actual <= delta)
     assert(taskInfo.getSlaveId.getValue === "s1")
+  }
 
-    // Unwanted resources offered on an existing node. Make sure they are declined
-    val mesosOffers2 = makeOffersList(makeOffer("o1", "s1", minMem, minCpu))
+  test("When unacceptable Mesos resource offers are received, no tasks are launched for them") {
+
+    val (backend, driver, capture, mesosOffers) = offerResourcesHelper()
+    val badOffer1  = mesosOffers.get(1)
+    val goodOffer2 = mesosOffers.get(2)
+    val badOffer2  = mesosOffers.get(3)
+
+    verify(driver, times(1)).declineOffer(badOffer1.getId)
+    verify(driver, times(1)).declineOffer(goodOffer2.getId)
+    verify(driver, times(1)).declineOffer(badOffer2.getId)
+  }
+
+  test("When acceptable Mesos resource offers are received for a node that already has an executor, they are declined") {
+
+    val (backend, driver, capture, mesosOffers) = offerResourcesHelper()
+    val goodOffer1 = mesosOffers.get(0)
+    val taskScheduler = backend.scheduler
     reset(taskScheduler)
     reset(driver)
+
     when(taskScheduler.resourceOffers(any(classOf[Seq[WorkerOffer]]))).thenReturn(Seq(Seq()))
     when(taskScheduler.CPUS_PER_TASK).thenReturn(2)
-    when(driver.declineOffer(mesosOffers2.get(0).getId)).thenReturn(Status.valueOf(1))
+    when(driver.declineOffer(goodOffer1.getId)).thenReturn(Status.valueOf(1))
 
-    backend.resourceOffers(driver, mesosOffers2)
-    verify(driver, times(1)).declineOffer(mesosOffers2.get(0).getId)
+    backend.resourceOffers(driver, makeOffersList(goodOffer1))
+    verify(driver, times(1)).declineOffer(goodOffer1.getId)
   }
 }
