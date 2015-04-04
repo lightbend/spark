@@ -25,7 +25,7 @@ import com.typesafe.config.Config
 import org.apache.mesos.Protos.Value.Scalar
 import org.apache.mesos.Protos._
 import org.apache.mesos.SchedulerDriver
-import org.apache.spark.scheduler.{SchedulerBackend, TaskSchedulerImpl}
+import org.apache.spark.scheduler.{ LiveListenerBus, SchedulerBackend, TaskSchedulerImpl }
 import org.apache.spark.{ LocalSparkContext, SparkConf, SparkEnv, SparkContext }
 import org.mockito.Matchers._
 import org.mockito.Mockito._
@@ -38,7 +38,10 @@ import scala.collection.mutable
 trait MesosSchedulerBackendSuiteHelper {
   self: FunSuite with LocalSparkContext with MockitoSugar =>
 
-  private def makeOffer(offerId: String, slaveId: String, mem: Int, cpu: Int) = {
+  protected def makeTestMesosSchedulerBackend(
+      taskScheduler: TaskSchedulerImpl): CommonMesosSchedulerBackend
+
+  protected def makeOffer(offerId: String, slaveId: String, mem: Int, cpu: Int) = {
     val builder = Offer.newBuilder()
     builder.addResourcesBuilder()
       .setName("mem")
@@ -49,16 +52,16 @@ trait MesosSchedulerBackendSuiteHelper {
       .setType(Value.Type.SCALAR)
       .setScalar(Scalar.newBuilder().setValue(cpu))
     builder.setId(OfferID.newBuilder().setValue(offerId).build()).setFrameworkId(FrameworkID.newBuilder().setValue("f1"))
-      .setSlaveId(SlaveID.newBuilder().setValue(slaveId)).setHostname(s"host$slaveId").build()
+      .setSlaveId(SlaveID.newBuilder().setValue(slaveId)).setHostname(s"host_$slaveId").build()
   }
 
-  private def makeOffersList(offers: Offer*): java.util.ArrayList[Offer] = {
+  protected def makeOffersList(offers: Offer*): java.util.ArrayList[Offer] = {
     val mesosOffers = new java.util.ArrayList[Offer]
     for (o <- offers) mesosOffers.add(o)
     mesosOffers
   }
 
-  private def mockSparkContext: SparkContext = {
+  protected def makeMockSparkContext(): SparkContext = {
     val sparkConf = new SparkConf
     sparkConf.set("spark.driver.host", "driverHost")
     sparkConf.set("spark.driver.port", "1234")
@@ -71,41 +74,42 @@ trait MesosSchedulerBackendSuiteHelper {
     when(sc.executorEnvs).thenReturn(emptyHashMap)
     when(sc.conf).thenReturn(sparkConf)
     when(sc.env).thenReturn(se)
+
+    val listenerBus = mock[LiveListenerBus]
+    when(sc.listenerBus).thenReturn(listenerBus)
+
     sc
   }
 
-  private def mockEnvironment: (SparkContext, TaskSchedulerImpl, SchedulerDriver) = {
-    val sc = mockSparkContext
+  protected def makeMockEnvironment(): (SparkContext, TaskSchedulerImpl, SchedulerDriver) = {
+    val sc = makeMockSparkContext()
     val driver = mock[SchedulerDriver]
     val taskScheduler = mock[TaskSchedulerImpl]
     when(taskScheduler.sc).thenReturn(sc)
     (sc, taskScheduler, driver)
   }
 
-  private def makeBackendAndDriver: (CommonMesosSchedulerBackend, SchedulerDriver) = {
-    val (sc, taskScheduler, driver) = mockEnvironment
+  protected def makeBackendAndDriver(): (CommonMesosSchedulerBackend, SchedulerDriver) = {
+    val (sc, taskScheduler, driver) = makeMockEnvironment()
     val backend = makeTestMesosSchedulerBackend(taskScheduler)
     backend.driver = driver
     (backend, driver)
   }
 
-  private def makeTaskID( id: String): TaskID  = TaskID.newBuilder().setValue(id).build()
-  private def makeSlaveID(id: String): SlaveID = SlaveID.newBuilder().setValue(id).build()
-  private def makeOfferID(id: String): OfferID = OfferID.newBuilder().setValue(id).build()
+  protected def makeTaskID( id: String): TaskID  = TaskID.newBuilder().setValue(id).build()
+  protected def makeSlaveID(id: String): SlaveID = SlaveID.newBuilder().setValue(id).build()
+  protected def makeOfferID(id: String): OfferID = OfferID.newBuilder().setValue(id).build()
 
   // Simulate task killed message, signaling that an executor is no longer running.
-  private def makeKilledTaskStatus(taskId: String, slaveId: String) =
+  protected def makeKilledTaskStatus(taskId: String, slaveId: String) =
     TaskStatus.newBuilder()
       .setTaskId(makeTaskID(taskId))
       .setSlaveId(makeSlaveID(slaveId))
       .setState(TaskState.TASK_KILLED)
       .build
 
-  private def minMemMinCPU(sc: SparkContext, extraMemory: Int = 0, numCores: Int = 4): (Int,Int) =
+  protected def minMemMinCPU(sc: SparkContext, extraMemory: Int = 0, numCores: Int = 4): (Int,Int) =
     (MemoryUtils.calculateTotalMemory(sc).toInt + extraMemory, numCores)
-
-  protected def makeTestMesosSchedulerBackend(
-      taskScheduler: TaskSchedulerImpl): CommonMesosSchedulerBackend
 
   val (taskIDVal1, slaveIDVal1) = ("0", "s1")
   val (taskIDVal2, slaveIDVal2) = ("1", "s2")

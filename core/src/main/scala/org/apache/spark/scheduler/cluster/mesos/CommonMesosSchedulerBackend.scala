@@ -39,8 +39,6 @@ import org.apache.spark.util.{Utils, AkkaUtils}
 /**
  * Shared code between {@link FineGrainedMesosSchedulerBackend} and
  * {@link CoarseGrainedMesosSchedulerBackend}.
- * TODO: This should really be private to the mesos package, but we need visibility
- * in the tests, which are not in the same package. Fix the latter.
  */
 trait CommonMesosSchedulerBackend extends SchedulerBackend {
 

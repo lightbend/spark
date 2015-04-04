@@ -150,24 +150,18 @@ private[spark] class FineGrainedMesosSchedulerBackend(
       val (usableOffers, unUsableOffers) = offers.partition { o =>
         val mem = getResource(o.getResourcesList, "mem")
         val cpus = getResource(o.getResourcesList, "cpus")
-        val slaveId = o.getSlaveId.getValue
+        val minMemory = MemoryUtils.calculateTotalMemory(sparkContext)
         // TODO(pwendell): Should below be 1 + scheduler.CPUS_PER_TASK?
-        (mem >= MemoryUtils.calculateTotalMemory(sparkContext) &&
-          // need at least 1 for executor, 1 for task
-          cpus >= 2 * scheduler.CPUS_PER_TASK) ||
-          (slaveIdsWithExecutors.contains(slaveId) &&
-            cpus >= scheduler.CPUS_PER_TASK)
+        (mem >= minMemory && cpus >= 2 * scheduler.CPUS_PER_TASK) ||
+        (slaveHasExecutor(o) && cpus >= scheduler.CPUS_PER_TASK)
       }
 
       val workerOffers = usableOffers.map { o =>
-        val cpus = if (slaveIdsWithExecutors.contains(o.getSlaveId.getValue)) {
-          getResource(o.getResourcesList, "cpus").toInt
-        } else {
-          // If the executor doesn't exist yet, subtract CPU for executor
-          // TODO(pwendell): Should below just subtract "1"?
-          getResource(o.getResourcesList, "cpus").toInt -
-            scheduler.CPUS_PER_TASK
-        }
+        // If the executor doesn't exist yet, subtract CPU for executor
+        // TODO(pwendell): Should below just subtract "1"?
+        val cpus1 = getResource(o.getResourcesList, "cpus").toInt
+        val cpus = if (slaveHasExecutor(o)) cpus1 else cpus1 - scheduler.CPUS_PER_TASK
+
         new WorkerOffer(
           o.getSlaveId.getValue,
           o.getHostname,
@@ -199,11 +193,12 @@ private[spark] class FineGrainedMesosSchedulerBackend(
       val filters = Filters.newBuilder().setRefuseSeconds(1).build() // TODO: lower timeout?
 
       mesosTasks.foreach { case (slaveId, tasks) =>
-        slaveIdToWorkerOffer.get(slaveId).foreach(o =>
-          listenerBus.post(SparkListenerExecutorAdded(System.currentTimeMillis(), slaveId,
+        slaveIdToWorkerOffer.get(slaveId).foreach { o =>
+          val executorAdded = SparkListenerExecutorAdded(System.currentTimeMillis(), slaveId,
             // TODO: Add support for log urls for Mesos
-            new ExecutorInfo(o.host, o.cores, Map.empty)))
-        )
+            new ExecutorInfo(o.host, o.cores, Map.empty))
+          listenerBus.post(executorAdded)
+        }
         d.launchTasks(Collections.singleton(slaveIdToOffer(slaveId).getId), tasks, filters)
       }
 
@@ -262,6 +257,11 @@ private[spark] class FineGrainedMesosSchedulerBackend(
 
   override def reviveOffers(): Unit = {
     driver.reviveOffers()
+  }
+
+  protected def slaveHasExecutor(o: Offer) = {
+    val slaveId = o.getSlaveId.getValue
+    slaveIdsWithExecutors.contains(slaveId)
   }
 
   /**

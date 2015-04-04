@@ -39,23 +39,26 @@ import org.apache.spark.scheduler.{LiveListenerBus, SparkListenerExecutorAdded,
   TaskDescription, TaskSchedulerImpl, WorkerOffer}
 import org.apache.spark.scheduler.cluster.ExecutorInfo
 
-class FineGrainedMesosSchedulerBackendSuite extends FunSuite with LocalSparkContext with MockitoSugar {
+class FineGrainedMesosSchedulerBackendSuite
+  extends FunSuite
+  with MesosSchedulerBackendSuiteHelper
+  with LocalSparkContext
+  with MockitoSugar {
+
+  protected def makeTestMesosSchedulerBackend(
+      taskScheduler: TaskSchedulerImpl): FineGrainedMesosSchedulerBackend = {
+    new FineGrainedMesosSchedulerBackend(taskScheduler, taskScheduler.sc, "master")
+  }
 
   test("The spark-class location is correctly computed") {
-    val conf = new SparkConf
-    conf.set("spark.mesos.executor.home" , "/mesos-home")
+    val sc = makeMockSparkContext()
+    sc.conf.set("spark.mesos.executor.home" , "/mesos-home")
 
-    val listenerBus = mock[LiveListenerBus]
-    listenerBus.post(
+    sc.listenerBus.post(
       SparkListenerExecutorAdded(anyLong, "s1", new ExecutorInfo("host1", 2, Map.empty)))
 
-    val sc = mock[SparkContext]
     when(sc.getSparkHome()).thenReturn(Option("/spark-home"))
 
-    when(sc.conf).thenReturn(conf)
-    when(sc.executorEnvs).thenReturn(new mutable.HashMap[String, String])
-    when(sc.executorMemory).thenReturn(100)
-    when(sc.listenerBus).thenReturn(listenerBus)
     val taskScheduler = mock[TaskSchedulerImpl]
     when(taskScheduler.CPUS_PER_TASK).thenReturn(2)
 
@@ -66,49 +69,27 @@ class FineGrainedMesosSchedulerBackendSuite extends FunSuite with LocalSparkCont
     assert(executorInfo.getCommand.getValue === s""" "/mesos-home/bin/spark-class" ${classOf[MesosExecutorBackend].getName} """)
 
     // uri exists.
-    conf.set("spark.executor.uri", "hdfs:///test-app-1.0.0.tgz")
+    sc.conf.set("spark.executor.uri", "hdfs:///test-app-1.0.0.tgz")
     val executorInfo1 = mesosSchedulerBackend.createExecutorInfo("test-id")
     assert(executorInfo1.getCommand.getValue === s"""cd test-app-1*;  "./bin/spark-class" ${classOf[MesosExecutorBackend].getName} """)
   }
 
   test("When Mesos resource offers are received, tasks are launched") {
-    def createOffer(id: Int, mem: Int, cpu: Int) = {
-      val builder = Offer.newBuilder()
-      builder.addResourcesBuilder()
-        .setName("mem")
-        .setType(Value.Type.SCALAR)
-        .setScalar(Scalar.newBuilder().setValue(mem))
-      builder.addResourcesBuilder()
-        .setName("cpus")
-        .setType(Value.Type.SCALAR)
-        .setScalar(Scalar.newBuilder().setValue(cpu))
-      builder.setId(OfferID.newBuilder().setValue(s"o${id.toString}").build()).setFrameworkId(FrameworkID.newBuilder().setValue("f1"))
-        .setSlaveId(SlaveID.newBuilder().setValue(s"s${id.toString}")).setHostname(s"host${id.toString}").build()
-    }
 
-    val driver = mock[SchedulerDriver]
-    val taskScheduler = mock[TaskSchedulerImpl]
+    val (backend, driver) = makeBackendAndDriver()
+    val taskScheduler = backend.scheduler
 
-    val listenerBus = mock[LiveListenerBus]
-    listenerBus.post(
-      SparkListenerExecutorAdded(anyLong, "s1", new ExecutorInfo("host1", 2, Map.empty)))
-
-    val sc = mock[SparkContext]
-    when(sc.executorMemory).thenReturn(100)
+    val sc = taskScheduler.sc  // a mocked object
     when(sc.getSparkHome()).thenReturn(Option("/path"))
-    when(sc.executorEnvs).thenReturn(new mutable.HashMap[String, String])
-    when(sc.conf).thenReturn(new SparkConf)
-    when(sc.listenerBus).thenReturn(listenerBus)
+    sc.listenerBus.post(
+      SparkListenerExecutorAdded(anyLong, "s1", new ExecutorInfo("host_s1", 2, Map.empty)))
 
-    val minMem = MemoryUtils.calculateTotalMemory(sc).toInt
-    val minCpu = 4
+    val (minMem, minCpu) = minMemMinCPU(sc)
 
-    val mesosOffers = new java.util.ArrayList[Offer]
-    mesosOffers.add(createOffer(1, minMem, minCpu))
-    mesosOffers.add(createOffer(2, minMem - 1, minCpu))
-    mesosOffers.add(createOffer(3, minMem, minCpu))
-
-    val backend = new FineGrainedMesosSchedulerBackend(taskScheduler, sc, "master")
+    val mesosOffers = makeOffersList(
+      makeOffer("o1", "s1", minMem,     minCpu),
+      makeOffer("o2", "s2", minMem - 1, minCpu),
+      makeOffer("o3", "s3", minMem,     minCpu))
 
     val expectedWorkerOffers = new ArrayBuffer[WorkerOffer](2)
     expectedWorkerOffers.append(new WorkerOffer(
@@ -145,17 +126,18 @@ class FineGrainedMesosSchedulerBackendSuite extends FunSuite with LocalSparkCont
     )
     verify(driver, times(1)).declineOffer(mesosOffers.get(1).getId)
     verify(driver, times(1)).declineOffer(mesosOffers.get(2).getId)
-    assert(capture.getValue.size() == 1)
+    assert(capture.getValue.size() === 1)
     val taskInfo = capture.getValue.iterator().next()
-    assert(taskInfo.getName.equals("n1"))
+    assert(taskInfo.getName === "n1")
     val cpus = taskInfo.getResourcesList.get(0)
-    assert(cpus.getName.equals("cpus"))
-    assert(cpus.getScalar.getValue.equals(2.0))
-    assert(taskInfo.getSlaveId.getValue.equals("s1"))
+    assert(cpus.getName === "cpus")
+    val actual = cpus.getScalar.getValue - 2.0
+    val delta = 0.00001
+    assert(actual >= - delta && actual <= delta)
+    assert(taskInfo.getSlaveId.getValue === "s1")
 
     // Unwanted resources offered on an existing node. Make sure they are declined
-    val mesosOffers2 = new java.util.ArrayList[Offer]
-    mesosOffers2.add(createOffer(1, minMem, minCpu))
+    val mesosOffers2 = makeOffersList(makeOffer("o1", "s1", minMem, minCpu))
     reset(taskScheduler)
     reset(driver)
     when(taskScheduler.resourceOffers(any(classOf[Seq[WorkerOffer]]))).thenReturn(Seq(Seq()))
