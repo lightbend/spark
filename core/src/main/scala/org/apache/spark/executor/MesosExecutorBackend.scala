@@ -54,7 +54,7 @@ private[spark] class MesosExecutorBackend
       frameworkInfo: FrameworkInfo,
       slaveInfo: SlaveInfo) {
 
-    // Get num cores for this task from ExecutorInfo, created in MesosSchedulerBackend.
+    // Get num cores for this task from ExecutorInfo, created in FineGrainedMesosSchedulerBackend.
     val cpusPerTask = executorInfo.getResourcesList
       .find(_.getName == "cpus")
       .map(_.getScalar.getValue.toInt)
