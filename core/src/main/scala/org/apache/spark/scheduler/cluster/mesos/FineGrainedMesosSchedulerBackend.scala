@@ -148,20 +148,21 @@ private[spark] class FineGrainedMesosSchedulerBackend(
     inClassLoader() {
       // Fail-fast on offers we know will be rejected
       val (usableOffers, unUsableOffers) = offers.partition { o =>
+        val slaveId = o.getSlaveId.getValue
         val mem = getResource(o.getResourcesList, "mem")
         val cpus = getResource(o.getResourcesList, "cpus")
         val minMemory = MemoryUtils.calculateTotalMemory(sparkContext)
         // TODO(pwendell): Should below be 1 + scheduler.CPUS_PER_TASK?
         (mem >= minMemory && cpus >= 2 * scheduler.CPUS_PER_TASK) ||
-        (slaveHasExecutor(o) && cpus >= scheduler.CPUS_PER_TASK)
+        (slaveHasExecutor(slaveId) && cpus >= scheduler.CPUS_PER_TASK)
       }
 
       val workerOffers = usableOffers.map { o =>
         // If the executor doesn't exist yet, subtract CPU for executor
         // TODO(pwendell): Should below just subtract "1"?
+        val slaveId = o.getSlaveId.getValue
         val cpus1 = getResource(o.getResourcesList, "cpus").toInt
-        val cpus = if (slaveHasExecutor(o)) cpus1 else cpus1 - scheduler.CPUS_PER_TASK
-
+        val cpus = if (slaveHasExecutor(slaveId)) cpus1 else cpus1 - scheduler.CPUS_PER_TASK
         new WorkerOffer(
           o.getSlaveId.getValue,
           o.getHostname,
@@ -257,11 +258,6 @@ private[spark] class FineGrainedMesosSchedulerBackend(
 
   override def reviveOffers(): Unit = {
     driver.reviveOffers()
-  }
-
-  protected def slaveHasExecutor(o: Offer) = {
-    val slaveId = o.getSlaveId.getValue
-    slaveIdsWithExecutors.contains(slaveId)
   }
 
   /**

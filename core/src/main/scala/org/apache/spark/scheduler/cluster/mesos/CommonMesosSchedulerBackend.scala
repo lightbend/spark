@@ -73,6 +73,10 @@ trait CommonMesosSchedulerBackend extends SchedulerBackend {
 
   private[mesos] val slaveIdsWithExecutors = MutableHashSet.empty[String]
 
+  def slaveHasExecutor(slaveId: String) = {
+    slaveIdsWithExecutors.contains(slaveId)
+  }
+
   private def executorBackendName: String = executorBackend.getName
   private def executorSimpleBackendName: String = executorBackend.getSimpleName
 

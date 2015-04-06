@@ -28,6 +28,7 @@ import scala.collection.mutable.ArrayBuffer
 import org.apache.mesos.SchedulerDriver
 import org.apache.mesos.Protos._
 import org.apache.mesos.Protos.Value.Scalar
+import org.apache.mesos.Protos.{TaskState => MesosTaskState}
 import org.mockito.Mockito._
 import org.mockito.Matchers._
 import org.mockito.{ArgumentCaptor, Matchers}
@@ -51,7 +52,7 @@ class FineGrainedMesosSchedulerBackendSuite
     new FineGrainedMesosSchedulerBackend(taskScheduler, taskScheduler.sc, "master")
   }
 
-  def makeTestOffers(sc: SparkContext): (Offer, Offer, Offer, Offer) = {
+  protected def makeTestOffers(sc: SparkContext): (Offer, Offer, Offer, Offer) = {
     val (minMem, minCpu) = minMemMinCPU(sc)
     val goodOffer1 = makeOffer("o1", "s1", minMem,     minCpu)
     val badOffer1  = makeOffer("o2", "s2", minMem - 1, minCpu)      // memory will be too small.
@@ -60,6 +61,18 @@ class FineGrainedMesosSchedulerBackendSuite
     (goodOffer1, badOffer1, goodOffer2, badOffer2)
   }
 
+  protected def checkLaunchTask(
+      driver: SchedulerDriver, offer: Offer, expectedValue: Int): ArgumentCaptor[util.Collection[TaskInfo]] = {
+    val capture = ArgumentCaptor.forClass(classOf[util.Collection[TaskInfo]])
+    when(
+      driver.launchTasks(
+        Matchers.eq(Collections.singleton(offer.getId)),
+        capture.capture(),
+        any(classOf[Filters])
+      )
+    ).thenReturn(Status.valueOf(expectedValue))
+    capture
+  }
 
   test("The spark-class location is correctly computed") {
     val sc = makeMockSparkContext()
@@ -84,6 +97,11 @@ class FineGrainedMesosSchedulerBackendSuite
     val executorInfo1 = mesosSchedulerBackend.createExecutorInfo("test-id")
     assert(executorInfo1.getCommand.getValue === s"""cd test-app-1*;  "./bin/spark-class" ${classOf[MesosExecutorBackend].getName} """)
   }
+
+  // The mock taskScheduler will only accept the first offer.
+  private val expectedTaskId1 = 1L
+  private val expectedTaskDescriptions =
+    Seq(Seq(new TaskDescription(expectedTaskId1, 0, "s1", "n1", 0, ByteBuffer.wrap(new Array[Byte](0)))))
 
   protected def offerResourcesHelper():
       (CommonMesosSchedulerBackend, SchedulerDriver, ArgumentCaptor[util.Collection[TaskInfo]], JArrayList[Offer]) = {
@@ -112,19 +130,9 @@ class FineGrainedMesosSchedulerBackendSuite
       2
     ))
 
-    // The mock taskScheduler will only accept the first offer.
-    val expectedTaskDescriptions = Seq(new TaskDescription(1L, 0, "s1", "n1", 0, ByteBuffer.wrap(new Array[Byte](0))))
+    when(taskScheduler.resourceOffers(expectedWorkerOffers)).thenReturn(expectedTaskDescriptions)
 
-    when(taskScheduler.resourceOffers(expectedWorkerOffers)).thenReturn(Seq(expectedTaskDescriptions))
-
-    val capture = ArgumentCaptor.forClass(classOf[util.Collection[TaskInfo]])
-    when(
-      driver.launchTasks(
-        Matchers.eq(Collections.singleton(goodOffer1.getId)),
-        capture.capture(),
-        any(classOf[Filters])
-      )
-    ).thenReturn(Status.valueOf(1))
+    val capture = checkLaunchTask(driver, goodOffer1, 1)
     when(driver.declineOffer(badOffer1.getId)).thenReturn(Status.valueOf(1))
     when(driver.declineOffer(goodOffer2.getId)).thenReturn(Status.valueOf(1))
     when(driver.declineOffer(badOffer2.getId)).thenReturn(Status.valueOf(1))
@@ -134,7 +142,7 @@ class FineGrainedMesosSchedulerBackendSuite
     (backend, driver, capture, mesosOffers)
   }
 
-  test("When acceptable Mesos resource offers are received, tasks are launched for for them") {
+  test("When acceptable Mesos resource offers are received, tasks are launched for them") {
 
     val (backend, driver, capture, mesosOffers) = offerResourcesHelper()
     val goodOffer1 = mesosOffers.get(0)
@@ -173,14 +181,52 @@ class FineGrainedMesosSchedulerBackendSuite
     val (backend, driver, capture, mesosOffers) = offerResourcesHelper()
     val goodOffer1 = mesosOffers.get(0)
     val taskScheduler = backend.scheduler
-    reset(taskScheduler)
+    resetTaskScheduler(taskScheduler)
     reset(driver)
 
     when(taskScheduler.resourceOffers(any(classOf[Seq[WorkerOffer]]))).thenReturn(Seq(Seq()))
-    when(taskScheduler.CPUS_PER_TASK).thenReturn(2)
     when(driver.declineOffer(goodOffer1.getId)).thenReturn(Status.valueOf(1))
 
     backend.resourceOffers(driver, makeOffersList(goodOffer1))
     verify(driver, times(1)).declineOffer(goodOffer1.getId)
+  }
+
+  test("When acceptable Mesos resource offers are received for a node that had an executor that is now gone, they are accepted") {
+
+    val (backend, driver, capture, mesosOffers) = offerResourcesHelper()
+    val goodOffer1 = mesosOffers.get(0)
+    val goodOffer2 = mesosOffers.get(1)
+    val slaveId1   = goodOffer1.getSlaveId.getValue
+    val taskScheduler = backend.scheduler
+
+    resetTaskScheduler(taskScheduler)
+    reset(driver)
+
+    // First, reconfirm that offers are rejected while the executor exists.
+    when(taskScheduler.resourceOffers(any(classOf[Seq[WorkerOffer]]))).thenReturn(Seq(Seq()))
+    when(driver.declineOffer(goodOffer1.getId)).thenReturn(Status.valueOf(1))
+
+    backend.resourceOffers(driver, makeOffersList(goodOffer1))
+    verify(driver, times(1)).declineOffer(goodOffer1.getId)
+
+    // Now, kill the executor, re-offer, and confirm an offer is now accepted (again).
+    resetTaskScheduler(taskScheduler)
+    reset(driver)
+
+    val expectedWorkerOffers = new ArrayBuffer[WorkerOffer](1)
+    expectedWorkerOffers.append(new WorkerOffer(
+      goodOffer1.getSlaveId.getValue,
+      goodOffer1.getHostname,
+      2
+    ))
+
+    when(taskScheduler.resourceOffers(expectedWorkerOffers)).thenReturn(expectedTaskDescriptions)
+
+    backend.statusUpdate(driver, makeKilledTaskStatus(expectedTaskId1.toString, slaveId1, MesosTaskState.TASK_LOST))
+    assert(backend.slaveHasExecutor(slaveId1) === false)
+    checkLaunchTask(driver, goodOffer1, 1)
+
+    backend.resourceOffers(driver, makeOffersList(goodOffer1))
+    verify(driver, times(0)).declineOffer(goodOffer1.getId)
   }
 }

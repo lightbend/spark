@@ -23,7 +23,7 @@ import java.util.{ ArrayList => JArrayList }
 import akka.actor.ActorSystem
 import com.typesafe.config.Config
 import org.apache.mesos.Protos.Value.Scalar
-import org.apache.mesos.Protos._
+import org.apache.mesos.Protos.{TaskState => MesosTaskState, _}
 import org.apache.mesos.SchedulerDriver
 import org.apache.spark.scheduler.{ LiveListenerBus, SchedulerBackend, TaskSchedulerImpl }
 import org.apache.spark.{ LocalSparkContext, SparkConf, SparkEnv, SparkContext }
@@ -51,8 +51,10 @@ trait MesosSchedulerBackendSuiteHelper {
       .setName("cpus")
       .setType(Value.Type.SCALAR)
       .setScalar(Scalar.newBuilder().setValue(cpu))
-    builder.setId(OfferID.newBuilder().setValue(offerId).build()).setFrameworkId(FrameworkID.newBuilder().setValue("f1"))
-      .setSlaveId(SlaveID.newBuilder().setValue(slaveId)).setHostname(s"host_$slaveId").build()
+    builder.setId(OfferID.newBuilder().setValue(offerId).build())
+      .setFrameworkId(FrameworkID.newBuilder().setValue("f1"))
+      .setSlaveId(SlaveID.newBuilder().setValue(slaveId))
+      .setHostname(s"host_$slaveId").build()
   }
 
   protected def makeOffersList(offers: Offer*): JArrayList[Offer] = {
@@ -81,6 +83,14 @@ trait MesosSchedulerBackendSuiteHelper {
     sc
   }
 
+  protected def resetTaskScheduler(taskScheduler: TaskSchedulerImpl): TaskSchedulerImpl = {
+    val sc = taskScheduler.sc
+    reset(taskScheduler)
+    when(taskScheduler.sc).thenReturn(sc)
+    when(taskScheduler.CPUS_PER_TASK).thenReturn(2)
+    taskScheduler
+  }
+
   protected def makeMockEnvironment(): (SparkContext, TaskSchedulerImpl, SchedulerDriver) = {
     val sc = makeMockSparkContext()
     val driver = mock[SchedulerDriver]
@@ -101,11 +111,11 @@ trait MesosSchedulerBackendSuiteHelper {
   protected def makeOfferID(id: String): OfferID = OfferID.newBuilder().setValue(id).build()
 
   // Simulate task killed message, signaling that an executor is no longer running.
-  protected def makeKilledTaskStatus(taskId: String, slaveId: String) =
+  protected def makeKilledTaskStatus(taskId: String, slaveId: String, state: MesosTaskState = MesosTaskState.TASK_KILLED) =
     TaskStatus.newBuilder()
       .setTaskId(makeTaskID(taskId))
       .setSlaveId(makeSlaveID(slaveId))
-      .setState(TaskState.TASK_KILLED)
+      .setState(state)
       .build
 
   protected def minMemMinCPU(sc: SparkContext, extraMemory: Int = 0, numCores: Int = 4): (Int,Int) =
