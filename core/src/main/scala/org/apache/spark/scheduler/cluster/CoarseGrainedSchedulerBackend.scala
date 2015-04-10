@@ -284,7 +284,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val rpcEnv: Rp
   }
 
   // Called by subclasses when notified of a lost worker
-  def removeExecutor(executorId: String, reason: String) {
+  def removeExecutor(executorId: String, reason: String): Unit = {
     try {
       driverEndpoint.askWithReply[Boolean](RemoveExecutor(executorId, reason))
     } catch {
