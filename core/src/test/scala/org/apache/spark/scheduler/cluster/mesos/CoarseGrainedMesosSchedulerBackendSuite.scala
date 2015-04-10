@@ -19,14 +19,18 @@ package org.apache.spark.scheduler.cluster.mesos
 
 import java.util
 import java.util.Collections
+import scala.collection.mutable.ArrayBuffer
 
 import akka.actor.ActorSystem
 import com.typesafe.config.Config
 import org.apache.mesos.Protos.Value.Scalar
 import org.apache.mesos.Protos._
 import org.apache.mesos.SchedulerDriver
-import org.apache.spark.scheduler.TaskSchedulerImpl
 import org.apache.spark.{ LocalSparkContext, SparkConf, SparkEnv, SparkContext }
+import org.apache.spark.scheduler.TaskSchedulerImpl
+import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessage
+
+import org.apache.spark.rpc.{RpcCallContext, RpcEndpointRef}
 import org.mockito.Matchers._
 import org.mockito.Mockito._
 import org.mockito.{ ArgumentCaptor, Matchers }
@@ -43,10 +47,19 @@ class CoarseGrainedMesosSchedulerBackendSuite
 
   protected def makeTestMesosSchedulerBackend(
       taskScheduler: TaskSchedulerImpl): CoarseGrainedMesosSchedulerBackend = {
-    new CoarseGrainedMesosSchedulerBackend(taskScheduler, taskScheduler.sc, "master") {
+    val backend = new CoarseGrainedMesosSchedulerBackend(
+        taskScheduler, taskScheduler.sc, "master") {
       override val driverUrl = "<stub>"
+
+      // Since we don't call the start() method, we have to initialize this
+      // ourselves. We use a mock.
+      driverEndpoint = makeMockDriverEndpoint
     }
+    backend
   }
+
+  // TODO: test that expected methods are called on the endpoint.
+  protected def makeMockDriverEndpoint: RpcEndpointRef = mock[RpcEndpointRef]
 
   val (taskIDVal1, slaveIDVal1) = ("0", "s1")
   val (taskIDVal2, slaveIDVal2) = ("1", "s2")
