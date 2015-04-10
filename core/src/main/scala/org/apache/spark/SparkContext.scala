@@ -56,7 +56,7 @@ import org.apache.spark.rpc.RpcAddress
 import org.apache.spark.scheduler._
 import org.apache.spark.scheduler.cluster.{CoarseGrainedSchedulerBackend,
   SparkDeploySchedulerBackend, SimrSchedulerBackend}
-import org.apache.spark.scheduler.cluster.mesos.{CoarseMesosSchedulerBackend, MesosSchedulerBackend}
+import org.apache.spark.scheduler.cluster.mesos.{CoarseGrainedMesosSchedulerBackend, FineGrainedMesosSchedulerBackend}
 import org.apache.spark.scheduler.local.LocalBackend
 import org.apache.spark.storage._
 import org.apache.spark.ui.{SparkUI, ConsoleProgressBar}
@@ -415,7 +415,8 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   private[spark] val executorAllocationManager: Option[ExecutorAllocationManager] =
     if (dynamicAllocationEnabled) {
       assert(supportDynamicAllocation,
-        "Dynamic allocation of executors is currently only supported in YARN mode")
+        "Dynamic allocation of executors is currently only supported in YARN " +
+        "and Mesos coarse-grained modes")
       Some(new ExecutorAllocationManager(this, listenerBus, conf))
     } else {
       None
@@ -1143,10 +1144,11 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
 
   /**
    * Return whether dynamically adjusting the amount of resources allocated to
-   * this application is supported. This is currently only available for YARN.
+   * this application is supported. This is currently only available for YARN
+   * and Mesos coarse-grained modes.
    */
   private[spark] def supportDynamicAllocation =
-    master.contains("yarn") || dynamicAllocationTesting
+    master.contains("yarn") || master.contains("mesos") || dynamicAllocationTesting
 
   /**
    * :: DeveloperApi ::
@@ -1160,11 +1162,12 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   /**
    * Express a preference to the cluster manager for a given total number of executors.
    * This can result in canceling pending requests or filing additional requests.
-   * This is currently only supported in YARN mode. Return whether the request is received.
+   * This is currently only supported in YARN and Mesos modes.
+   * Return whether the request is received.
    */
   private[spark] override def requestTotalExecutors(numExecutors: Int): Boolean = {
-    assert(master.contains("yarn") || dynamicAllocationTesting,
-      "Requesting executors is currently only supported in YARN mode")
+    assert(supportDynamicAllocation,
+      "Requesting executors is currently only supported in YARN and Mesos modes")
     schedulerBackend match {
       case b: CoarseGrainedSchedulerBackend =>
         b.requestTotalExecutors(numExecutors)
@@ -1177,12 +1180,13 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   /**
    * :: DeveloperApi ::
    * Request an additional number of executors from the cluster manager.
-   * This is currently only supported in YARN mode. Return whether the request is received.
+   * This is currently only supported in YARN and Mesos modes.
+   * Return whether the request is received.
    */
   @DeveloperApi
   override def requestExecutors(numAdditionalExecutors: Int): Boolean = {
     assert(supportDynamicAllocation,
-      "Requesting executors is currently only supported in YARN mode")
+      "Requesting executors is currently only supported in YARN and Mesos modes")
     schedulerBackend match {
       case b: CoarseGrainedSchedulerBackend =>
         b.requestExecutors(numAdditionalExecutors)
@@ -1195,12 +1199,13 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   /**
    * :: DeveloperApi ::
    * Request that the cluster manager kill the specified executors.
-   * This is currently only supported in YARN mode. Return whether the request is received.
+   * This is currently only supported in YARN and Mesos modes.
+   * Return whether the request is received.
    */
   @DeveloperApi
   override def killExecutors(executorIds: Seq[String]): Boolean = {
     assert(supportDynamicAllocation,
-      "Killing executors is currently only supported in YARN mode")
+      "Killing executors is currently only supported in YARN and Mesos modes")
     schedulerBackend match {
       case b: CoarseGrainedSchedulerBackend =>
         b.killExecutors(executorIds)
@@ -1213,7 +1218,8 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   /**
    * :: DeveloperApi ::
    * Request that cluster manager the kill the specified executor.
-   * This is currently only supported in Yarn mode. Return whether the request is received.
+   * This is currently only supported in Yarn and Mesos modes.
+   * Return whether the request is received.
    */
   @DeveloperApi
   override def killExecutor(executorId: String): Boolean = super.killExecutor(executorId)
@@ -1403,17 +1409,17 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   def stop() {
     // Use the stopping variable to ensure no contention for the stop scenario.
     // Still track the stopped variable for use elsewhere in the code.
-    
+
     if (!stopped.compareAndSet(false, true)) {
       logInfo("SparkContext already stopped.")
       return
     }
-    
+
     postApplicationEnd()
     ui.foreach(_.stop())
     env.metricsSystem.report()
     metadataCleaner.cancel()
-    cleaner.foreach(_.stop()) 
+    cleaner.foreach(_.stop())
     executorAllocationManager.foreach(_.stop())
     dagScheduler.stop()
     dagScheduler = null
@@ -2267,9 +2273,9 @@ object SparkContext extends Logging {
         val coarseGrained = sc.conf.getBoolean("spark.mesos.coarse", false)
         val url = mesosUrl.stripPrefix("mesos://") // strip scheme from raw Mesos URLs
         val backend = if (coarseGrained) {
-          new CoarseMesosSchedulerBackend(scheduler, sc, url)
+          new CoarseGrainedMesosSchedulerBackend(scheduler, sc, url)
         } else {
-          new MesosSchedulerBackend(scheduler, sc, url)
+          new FineGrainedMesosSchedulerBackend(scheduler, sc, url)
         }
         scheduler.initialize(backend)
         (backend, scheduler)

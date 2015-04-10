@@ -77,7 +77,7 @@ private[r] class RBackendHandler(server: RBackend)
     val reply = bos.toByteArray
     ctx.write(reply)
   }
-  
+
   override def channelReadComplete(ctx: ChannelHandlerContext): Unit = {
     ctx.flush()
   }
@@ -97,6 +97,7 @@ private[r] class RBackendHandler(server: RBackend)
       dos: DataOutputStream): Unit = {
     var obj: Object = null
     try {
+      import scala.language.existentials
       val cls = if (isStatic) {
         Class.forName(objId)
       } else {

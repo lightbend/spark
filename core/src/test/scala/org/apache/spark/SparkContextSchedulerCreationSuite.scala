@@ -21,7 +21,7 @@ import org.scalatest.{FunSuite, PrivateMethodTester}
 
 import org.apache.spark.scheduler.{SchedulerBackend, TaskScheduler, TaskSchedulerImpl}
 import org.apache.spark.scheduler.cluster.{SimrSchedulerBackend, SparkDeploySchedulerBackend}
-import org.apache.spark.scheduler.cluster.mesos.{CoarseMesosSchedulerBackend, MesosSchedulerBackend}
+import org.apache.spark.scheduler.cluster.mesos.{CoarseGrainedMesosSchedulerBackend, FineGrainedMesosSchedulerBackend}
 import org.apache.spark.scheduler.local.LocalBackend
 
 class SparkContextSchedulerCreationSuite
@@ -166,14 +166,14 @@ class SparkContextSchedulerCreationSuite
   }
 
   test("mesos fine-grained") {
-    testMesos("mesos://localhost:1234", classOf[MesosSchedulerBackend], coarse = false)
+    testMesos("mesos://localhost:1234", classOf[FineGrainedMesosSchedulerBackend], coarse = false)
   }
 
   test("mesos coarse-grained") {
-    testMesos("mesos://localhost:1234", classOf[CoarseMesosSchedulerBackend], coarse = true)
+    testMesos("mesos://localhost:1234", classOf[CoarseGrainedMesosSchedulerBackend], coarse = true)
   }
 
   test("mesos with zookeeper") {
-    testMesos("zk://localhost:1234,localhost:2345", classOf[MesosSchedulerBackend], coarse = false)
+    testMesos("zk://localhost:1234,localhost:2345", classOf[FineGrainedMesosSchedulerBackend], coarse = false)
   }
 }
