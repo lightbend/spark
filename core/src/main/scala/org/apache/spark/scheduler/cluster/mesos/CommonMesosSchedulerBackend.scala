@@ -65,7 +65,7 @@ trait CommonMesosSchedulerBackend extends SchedulerBackend {
   /**
    *  Return the current executor limit, which may be [[Int.MaxValue]].
    */
-  def getExecutorLimit = executorLimit
+  def getExecutorLimit: Int = executorLimit
 
   protected val executorBackend: Class[_]
 
@@ -73,7 +73,7 @@ trait CommonMesosSchedulerBackend extends SchedulerBackend {
 
   private[mesos] val slaveIdsWithExecutors = MutableHashSet.empty[String]
 
-  def slaveHasExecutor(slaveId: String) = {
+  def slaveHasExecutor(slaveId: String): Boolean = {
     slaveIdsWithExecutors.contains(slaveId)
   }
 
@@ -195,7 +195,8 @@ trait CommonMesosSchedulerBackend extends SchedulerBackend {
    * Implements <tt>registered</tt> for coarse grained, but the fine grained
    * implementation wraps it in the separate class loader.
    */
-  protected def doRegistered(d: SchedulerDriver, frameworkId: FrameworkID, masterInfo: MasterInfo): Unit = {
+  protected def doRegistered(
+      d: SchedulerDriver, frameworkId: FrameworkID, masterInfo: MasterInfo): Unit = {
     appId = frameworkId.getValue
     logInfo("Registered as framework ID " + appId)
     registeredLock.synchronized {
@@ -243,5 +244,6 @@ trait CommonMesosSchedulerBackend extends SchedulerBackend {
     scheduler.error(message)
   }
 
-  override def frameworkMessage(d: SchedulerDriver, e: ExecutorID, s: SlaveID, b: Array[Byte]): Unit = {}
+  override def frameworkMessage(
+    d: SchedulerDriver, e: ExecutorID, s: SlaveID, b: Array[Byte]): Unit = {}
 }

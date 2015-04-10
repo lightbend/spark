@@ -125,7 +125,8 @@ private[spark] class FineGrainedMesosSchedulerBackend(
   }
 
   /** TODO: Is wrapping in the separate class loader necessary? */
-  override def registered(d: SchedulerDriver, frameworkId: FrameworkID, masterInfo: MasterInfo): Unit = {
+  override def registered(
+      d: SchedulerDriver, frameworkId: FrameworkID, masterInfo: MasterInfo): Unit = {
     inClassLoader() {
       doRegistered(d: SchedulerDriver, frameworkId: FrameworkID, masterInfo: MasterInfo)
     }
@@ -142,9 +143,9 @@ private[spark] class FineGrainedMesosSchedulerBackend(
   }
 
   /**
-   * Method called by Mesos to offer resources on slaves. We respond by asking our active task sets
-   * for tasks in order of priority. We fill each node with tasks in a round-robin manner so that
-   * tasks are balanced across the cluster.
+   * Method called by Mesos to offer resources on slaves. We respond by asking our
+   * active task sets for tasks in order of priority. We fill each node with tasks
+   * in a round-robin manner so that tasks are balanced across the cluster.
    */
   override def resourceOffers(d: SchedulerDriver, offers: JList[Offer]): Unit = {
     inClassLoader() {
@@ -271,7 +272,8 @@ private[spark] class FineGrainedMesosSchedulerBackend(
     }
   }
 
-  private def recordSlaveLost(d: SchedulerDriver, slaveId: SlaveID, reason: ExecutorLossReason): Unit = {
+  private def recordSlaveLost(
+      d: SchedulerDriver, slaveId: SlaveID, reason: ExecutorLossReason): Unit = {
     inClassLoader() {
       logInfo("Mesos slave lost: " + slaveId.getValue)
       removeExecutor(slaveId.getValue, reason.toString)
@@ -303,6 +305,7 @@ private[spark] class FineGrainedMesosSchedulerBackend(
   def doKillExecutors(executorIds: Seq[String]): Boolean = false
 
   // TODO: query Mesos for number of cores
-  override def defaultParallelism() = sparkContext.conf.getInt("spark.default.parallelism", 8)
+  override def defaultParallelism(): Int =
+    sparkContext.conf.getInt("spark.default.parallelism", 8)
 
 }

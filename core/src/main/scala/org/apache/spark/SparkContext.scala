@@ -58,7 +58,7 @@ import org.apache.spark.scheduler.cluster.{CoarseGrainedSchedulerBackend,
   SparkDeploySchedulerBackend, SimrSchedulerBackend}
 import org.apache.spark.scheduler.cluster.mesos.{CoarseGrainedMesosSchedulerBackend, FineGrainedMesosSchedulerBackend}
 import org.apache.spark.scheduler.local.LocalBackend
-import org.apache.spark.storage.FineGrained_
+import org.apache.spark.storage._
 import org.apache.spark.ui.{SparkUI, ConsoleProgressBar}
 import org.apache.spark.ui.jobs.JobProgressListener
 import org.apache.spark.util._
@@ -415,7 +415,8 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   private[spark] val executorAllocationManager: Option[ExecutorAllocationManager] =
     if (dynamicAllocationEnabled) {
       assert(supportDynamicAllocation,
-        "Dynamic allocation of executors is currently only supported in YARN and Mesos coarse-grained modes")
+        "Dynamic allocation of executors is currently only supported in YARN " +
+        "and Mesos coarse-grained modes")
       Some(new ExecutorAllocationManager(this, listenerBus, conf))
     } else {
       None
@@ -1179,7 +1180,8 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   /**
    * :: DeveloperApi ::
    * Request an additional number of executors from the cluster manager.
-   * This is currently only supported in YARN and Mesos modes. Return whether the request is received.
+   * This is currently only supported in YARN and Mesos modes.
+   * Return whether the request is received.
    */
   @DeveloperApi
   override def requestExecutors(numAdditionalExecutors: Int): Boolean = {
@@ -1197,7 +1199,8 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   /**
    * :: DeveloperApi ::
    * Request that the cluster manager kill the specified executors.
-   * This is currently only supported in YARN and Mesos modes. Return whether the request is received.
+   * This is currently only supported in YARN and Mesos modes.
+   * Return whether the request is received.
    */
   @DeveloperApi
   override def killExecutors(executorIds: Seq[String]): Boolean = {
@@ -1215,7 +1218,8 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   /**
    * :: DeveloperApi ::
    * Request that cluster manager the kill the specified executor.
-   * This is currently only supported in Yarn and Mesos modes. Return whether the request is received.
+   * This is currently only supported in Yarn and Mesos modes.
+   * Return whether the request is received.
    */
   @DeveloperApi
   override def killExecutor(executorId: String): Boolean = super.killExecutor(executorId)

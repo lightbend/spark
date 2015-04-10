@@ -50,7 +50,7 @@ private[spark] class CoarseGrainedMesosSchedulerBackend(
     val scheduler: TaskSchedulerImpl,
     val sparkContext: SparkContext,
     val master: String)
-  extends CoarseGrainedSchedulerBackend(scheduler, sparkContext.env.actorSystem)
+  extends CoarseGrainedSchedulerBackend(scheduler, sparkContext.env.rpcEnv)
   with CommonMesosSchedulerBackend
   with MScheduler
   with Logging {
@@ -92,13 +92,13 @@ private[spark] class CoarseGrainedMesosSchedulerBackend(
   protected def postStart(): Unit = {}
 
   /** @see CommonMesosSchedulerBackend.doStart() */
-  override def start() = {
+  override def start(): Unit = {
     super.start()
     doStart()
   }
 
   /** @see CommonMesosSchedulerBackend.doStop() */
-  override def stop() {
+  override def stop(): Unit = {
     super.stop()
     doStop()
   }
@@ -113,16 +113,15 @@ private[spark] class CoarseGrainedMesosSchedulerBackend(
     createCommandInfo(extraCommandArguments)
   }
 
-  protected def driverUrl: String = {
-    AkkaUtils.address(
-      AkkaUtils.protocol(sparkContext.env.actorSystem),
-      SparkEnv.driverActorSystemName,
-      conf.get("spark.driver.host"),
-      conf.get("spark.driver.port"),
-      CoarseGrainedSchedulerBackend.ACTOR_NAME)
-  }
+  protected def driverUrl: String = AkkaUtils.address(
+    AkkaUtils.protocol(sparkContext.env.actorSystem),
+    SparkEnv.driverActorSystemName,
+    conf.get("spark.driver.host"),
+    conf.get("spark.driver.port"),
+    CoarseGrainedSchedulerBackend.ENDPOINT_NAME)
 
-  override def registered(d: SchedulerDriver, frameworkId: FrameworkID, masterInfo: MasterInfo) = {
+  override def registered(
+      d: SchedulerDriver, frameworkId: FrameworkID, masterInfo: MasterInfo): Unit = {
     doRegistered(d: SchedulerDriver, frameworkId: FrameworkID, masterInfo: MasterInfo)
   }
 
@@ -208,7 +207,7 @@ private[spark] class CoarseGrainedMesosSchedulerBackend(
     }
   }
 
-  override def error(d: SchedulerDriver, message: String) = doError(d, message)
+  override def error(d: SchedulerDriver, message: String): Unit = doError(d, message)
 
   /** Called when a slave is lost or a Mesos task finished. Update local view on
    *  what tasks are running and remove the terminated slave from the list of pending
