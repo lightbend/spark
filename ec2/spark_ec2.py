@@ -62,6 +62,16 @@ VALID_SPARK_VERSIONS = set([
     "1.2.1",
 ])
 
+SPARK_TACHYON_MAP = {
+    "1.0.0": "0.4.1",
+    "1.0.1": "0.4.1",
+    "1.0.2": "0.4.1",
+    "1.1.0": "0.5.0",
+    "1.1.1": "0.5.0",
+    "1.2.0": "0.5.0",
+    "1.2.1": "0.5.0",
+}
+
 DEFAULT_SPARK_VERSION = SPARK_EC2_VERSION
 DEFAULT_SPARK_GITHUB_REPO = "https://github.com/apache/spark"
 
@@ -70,34 +80,60 @@ DEFAULT_SPARK_EC2_GITHUB_REPO = "https://github.com/mesos/spark-ec2"
 DEFAULT_SPARK_EC2_BRANCH = "branch-1.3"
 
 
-def setup_boto():
-    # Download Boto if it's not already present in the SPARK_EC2_DIR/lib folder:
-    version = "boto-2.34.0"
-    md5 = "5556223d2d0cc4d06dd4829e671dcecd"
-    url = "https://pypi.python.org/packages/source/b/boto/%s.tar.gz" % version
-    lib_dir = os.path.join(SPARK_EC2_DIR, "lib")
-    if not os.path.exists(lib_dir):
-        os.mkdir(lib_dir)
-    boto_lib_dir = os.path.join(lib_dir, version)
-    if not os.path.isdir(boto_lib_dir):
-        tgz_file_path = os.path.join(lib_dir, "%s.tar.gz" % version)
-        print "Downloading Boto from PyPi"
-        download_stream = urllib2.urlopen(url)
-        with open(tgz_file_path, "wb") as tgz_file:
-            tgz_file.write(download_stream.read())
-        with open(tgz_file_path) as tar:
-            if hashlib.md5(tar.read()).hexdigest() != md5:
-                print >> stderr, "ERROR: Got wrong md5sum for Boto"
-                sys.exit(1)
-        tar = tarfile.open(tgz_file_path)
-        tar.extractall(path=lib_dir)
-        tar.close()
-        os.remove(tgz_file_path)
-        print "Finished downloading Boto"
-    sys.path.insert(0, boto_lib_dir)
+def setup_external_libs(libs):
+    """
+    Download external libraries from PyPI to SPARK_EC2_DIR/lib/ and prepend them to our PATH.
+    """
+    PYPI_URL_PREFIX = "https://pypi.python.org/packages/source"
+    SPARK_EC2_LIB_DIR = os.path.join(SPARK_EC2_DIR, "lib")
+
+    if not os.path.exists(SPARK_EC2_LIB_DIR):
+        print "Downloading external libraries that spark-ec2 needs from PyPI to {path}...".format(
+            path=SPARK_EC2_LIB_DIR
+        )
+        print "This should be a one-time operation."
+        os.mkdir(SPARK_EC2_LIB_DIR)
+
+    for lib in libs:
+        versioned_lib_name = "{n}-{v}".format(n=lib["name"], v=lib["version"])
+        lib_dir = os.path.join(SPARK_EC2_LIB_DIR, versioned_lib_name)
+
+        if not os.path.isdir(lib_dir):
+            tgz_file_path = os.path.join(SPARK_EC2_LIB_DIR, versioned_lib_name + ".tar.gz")
+            print " - Downloading {lib}...".format(lib=lib["name"])
+            download_stream = urllib2.urlopen(
+                "{prefix}/{first_letter}/{lib_name}/{lib_name}-{lib_version}.tar.gz".format(
+                    prefix=PYPI_URL_PREFIX,
+                    first_letter=lib["name"][:1],
+                    lib_name=lib["name"],
+                    lib_version=lib["version"]
+                )
+            )
+            with open(tgz_file_path, "wb") as tgz_file:
+                tgz_file.write(download_stream.read())
+            with open(tgz_file_path) as tar:
+                if hashlib.md5(tar.read()).hexdigest() != lib["md5"]:
+                    print >> stderr, "ERROR: Got wrong md5sum for {lib}.".format(lib=lib["name"])
+                    sys.exit(1)
+            tar = tarfile.open(tgz_file_path)
+            tar.extractall(path=SPARK_EC2_LIB_DIR)
+            tar.close()
+            os.remove(tgz_file_path)
+            print " - Finished downloading {lib}.".format(lib=lib["name"])
+        sys.path.insert(1, lib_dir)
 
 
-setup_boto()
+# Only PyPI libraries are supported.
+external_libs = [
+    {
+        "name": "boto",
+        "version": "2.34.0",
+        "md5": "5556223d2d0cc4d06dd4829e671dcecd"
+    }
+]
+
+setup_external_libs(external_libs)
+
 import boto
 from boto.ec2.blockdevicemapping import BlockDeviceMapping, BlockDeviceType, EBSBlockDeviceType
 from boto import ec2
@@ -136,7 +172,7 @@ def parse_args():
         help="Master instance type (leave empty for same as instance-type)")
     parser.add_option(
         "-r", "--region", default="us-east-1",
-        help="EC2 region used to launch instances in, or to find them in")
+        help="EC2 region used to launch instances in, or to find them in (default: %default)")
     parser.add_option(
         "-z", "--zone", default="",
         help="Availability zone to launch instances in, or 'all' to spread " +
@@ -230,7 +266,7 @@ def parse_args():
              "(e.g -Dspark.worker.timeout=180)")
     parser.add_option(
         "--user-data", type="string", default="",
-        help="Path to a user-data file (most AMI's interpret this as an initialization script)")
+        help="Path to a user-data file (most AMIs interpret this as an initialization script)")
     parser.add_option(
         "--authorized-address", type="string", default="0.0.0.0/0",
         help="Address to authorize on created security groups (default: %default)")
@@ -246,6 +282,10 @@ def parse_args():
     parser.add_option(
         "--vpc-id", default=None,
         help="VPC to launch instances in")
+    parser.add_option(
+        "--private-ips", action="store_true", default=False,
+        help="Use private IPs for instances rather than public if VPC/subnet " +
+             "requires that.")
 
     (opts, args) = parser.parse_args()
     if len(args) != 2:
@@ -344,6 +384,10 @@ EC2_INSTANCE_TYPES = {
 }
 
 
+def get_tachyon_version(spark_version):
+    return SPARK_TACHYON_MAP.get(spark_version, "")
+
+
 # Attempt to resolve an appropriate AMI given the architecture and region of the request.
 def get_spark_ami(opts):
     if opts.instance_type in EC2_INSTANCE_TYPES:
@@ -416,6 +460,13 @@ def launch_cluster(conn, opts, cluster_name):
         master_group.authorize('tcp', 50070, 50070, authorized_address)
         master_group.authorize('tcp', 60070, 60070, authorized_address)
         master_group.authorize('tcp', 4040, 4045, authorized_address)
+        # HDFS NFS gateway requires 111,2049,4242 for tcp & udp
+        master_group.authorize('tcp', 111, 111, authorized_address)
+        master_group.authorize('udp', 111, 111, authorized_address)
+        master_group.authorize('tcp', 2049, 2049, authorized_address)
+        master_group.authorize('udp', 2049, 2049, authorized_address)
+        master_group.authorize('tcp', 4242, 4242, authorized_address)
+        master_group.authorize('udp', 4242, 4242, authorized_address)
         if opts.ganglia:
             master_group.authorize('tcp', 5080, 5080, authorized_address)
     if slave_group.rules == []:  # Group was just now created
@@ -660,7 +711,7 @@ def get_existing_cluster(conn, opts, cluster_name, die_on_error=True):
 # Deploy configuration files and run setup scripts on a newly launched
 # or started EC2 cluster.
 def setup_cluster(conn, master_nodes, slave_nodes, opts, deploy_ssh_key):
-    master = master_nodes[0].public_dns_name
+    master = get_dns_name(master_nodes[0], opts.private_ips)
     if deploy_ssh_key:
         print "Generating cluster's SSH key on master..."
         key_setup = """
@@ -672,8 +723,9 @@ def setup_cluster(conn, master_nodes, slave_nodes, opts, deploy_ssh_key):
         dot_ssh_tar = ssh_read(master, opts, ['tar', 'c', '.ssh'])
         print "Transferring cluster's SSH key to slaves..."
         for slave in slave_nodes:
-            print slave.public_dns_name
-            ssh_write(slave.public_dns_name, opts, ['tar', 'x'], dot_ssh_tar)
+            slave_address = get_dns_name(slave, opts.private_ips)
+            print slave_address
+            ssh_write(slave_address, opts, ['tar', 'x'], dot_ssh_tar)
 
     modules = ['spark', 'ephemeral-hdfs', 'persistent-hdfs',
                'mapreduce', 'spark-standalone', 'tachyon']
@@ -762,7 +814,8 @@ def is_cluster_ssh_available(cluster_instances, opts):
     Check if SSH is available on all the instances in a cluster.
     """
     for i in cluster_instances:
-        if not is_ssh_available(host=i.ip_address, opts=opts):
+        dns_name = get_dns_name(i, opts.private_ips)
+        if not is_ssh_available(host=dns_name, opts=opts):
             return False
     else:
         return True
@@ -876,7 +929,7 @@ def get_num_disks(instance_type):
 #
 # root_dir should be an absolute path to the directory with the files we want to deploy.
 def deploy_files(conn, root_dir, opts, master_nodes, slave_nodes, modules):
-    active_master = master_nodes[0].public_dns_name
+    active_master = get_dns_name(master_nodes[0], opts.private_ips)
 
     num_disks = get_num_disks(opts.instance_type)
     hdfs_data_dirs = "/mnt/ephemeral-hdfs/data"
@@ -893,14 +946,20 @@ def deploy_files(conn, root_dir, opts, master_nodes, slave_nodes, modules):
     if "." in opts.spark_version:
         # Pre-built Spark deploy
         spark_v = get_validate_spark_version(opts.spark_version, opts.spark_git_repo)
+        tachyon_v = get_tachyon_version(spark_v)
     else:
         # Spark-only custom deploy
         spark_v = "%s|%s" % (opts.spark_git_repo, opts.spark_version)
+        tachyon_v = ""
+        print "Deploying Spark via git hash; Tachyon won't be set up"
+        modules = filter(lambda x: x != "tachyon", modules)
 
+    master_addresses = [get_dns_name(i, opts.private_ips) for i in master_nodes]
+    slave_addresses = [get_dns_name(i, opts.private_ips) for i in slave_nodes]
     template_vars = {
-        "master_list": '\n'.join([i.public_dns_name for i in master_nodes]),
+        "master_list": '\n'.join(master_addresses),
         "active_master": active_master,
-        "slave_list": '\n'.join([i.public_dns_name for i in slave_nodes]),
+        "slave_list": '\n'.join(slave_addresses),
         "cluster_url": cluster_url,
         "hdfs_data_dirs": hdfs_data_dirs,
         "mapred_local_dirs": mapred_local_dirs,
@@ -908,6 +967,7 @@ def deploy_files(conn, root_dir, opts, master_nodes, slave_nodes, modules):
         "swap": str(opts.swap),
         "modules": '\n'.join(modules),
         "spark_version": spark_v,
+        "tachyon_version": tachyon_v,
         "hadoop_major_version": opts.hadoop_major_version,
         "spark_worker_instances": "%d" % opts.worker_instances,
         "spark_master_opts": opts.master_opts
@@ -959,7 +1019,7 @@ def deploy_files(conn, root_dir, opts, master_nodes, slave_nodes, modules):
 #
 # root_dir should be an absolute path.
 def deploy_user_files(root_dir, opts, master_nodes):
-    active_master = master_nodes[0].public_dns_name
+    active_master = get_dns_name(master_nodes[0], opts.private_ips)
     command = [
         'rsync', '-rv',
         '-e', stringify_command(ssh_command(opts)),
@@ -1070,6 +1130,20 @@ def get_partition(total, num_partitions, current_partitions):
     return num_slaves_this_zone
 
 
+# Gets the IP address, taking into account the --private-ips flag
+def get_ip_address(instance, private_ips=False):
+    ip = instance.ip_address if not private_ips else \
+        instance.private_ip_address
+    return ip
+
+
+# Gets the DNS name, taking into account the --private-ips flag
+def get_dns_name(instance, private_ips=False):
+    dns = instance.public_dns_name if not private_ips else \
+        instance.private_ip_address
+    return dns
+
+
 def real_main():
     (opts, action, cluster_name) = parse_args()
 
@@ -1114,8 +1188,8 @@ def real_main():
             if EC2_INSTANCE_TYPES[opts.instance_type] != \
                EC2_INSTANCE_TYPES[opts.master_instance_type]:
                 print >> stderr, \
-                    "Error: spark-ec2 currently does not support having a master and slaves with " + \
-                    "different AMI virtualization types."
+                    "Error: spark-ec2 currently does not support having a master and slaves " + \
+                    "with different AMI virtualization types."
                 print >> stderr, "master instance virtualization type: {t}".format(
                     t=EC2_INSTANCE_TYPES[opts.master_instance_type])
                 print >> stderr, "slave instance virtualization type: {t}".format(
@@ -1178,7 +1252,7 @@ def real_main():
         if any(master_nodes + slave_nodes):
             print "The following instances will be terminated:"
             for inst in master_nodes + slave_nodes:
-                print "> %s" % inst.public_dns_name
+                print "> %s" % get_dns_name(inst, opts.private_ips)
             print "ALL DATA ON ALL NODES WILL BE LOST!!"
 
         msg = "Are you sure you want to destroy the cluster {c}? (y/N) ".format(c=cluster_name)
@@ -1242,13 +1316,17 @@ def real_main():
 
     elif action == "login":
         (master_nodes, slave_nodes) = get_existing_cluster(conn, opts, cluster_name)
-        master = master_nodes[0].public_dns_name
-        print "Logging into master " + master + "..."
-        proxy_opt = []
-        if opts.proxy_port is not None:
-            proxy_opt = ['-D', opts.proxy_port]
-        subprocess.check_call(
-            ssh_command(opts) + proxy_opt + ['-t', '-t', "%s@%s" % (opts.user, master)])
+        if not master_nodes[0].public_dns_name and not opts.private_ips:
+            print "Master has no public DNS name.  Maybe you meant to specify " \
+                "--private-ips?"
+        else:
+            master = get_dns_name(master_nodes[0], opts.private_ips)
+            print "Logging into master " + master + "..."
+            proxy_opt = []
+            if opts.proxy_port is not None:
+                proxy_opt = ['-D', opts.proxy_port]
+            subprocess.check_call(
+                ssh_command(opts) + proxy_opt + ['-t', '-t', "%s@%s" % (opts.user, master)])
 
     elif action == "reboot-slaves":
         response = raw_input(
@@ -1266,7 +1344,11 @@ def real_main():
 
     elif action == "get-master":
         (master_nodes, slave_nodes) = get_existing_cluster(conn, opts, cluster_name)
-        print master_nodes[0].public_dns_name
+        if not master_nodes[0].public_dns_name and not opts.private_ips:
+            print "Master has no public DNS name.  Maybe you meant to specify " \
+                "--private-ips?"
+        else:
+            print get_dns_name(master_nodes[0], opts.private_ips)
 
     elif action == "stop":
         response = raw_input(

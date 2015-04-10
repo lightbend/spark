@@ -237,7 +237,8 @@ private[spark] class FineGrainedMesosSchedulerBackend(
       val tid = status.getTaskId.getValue.toLong
       val state = TaskState.fromMesos(status.getState)
       stateLock.synchronized {
-        if (TaskState.isFailed(state) && taskIdToSlaveId.contains(tid)) {
+        if (TaskState.isFailed(TaskState.fromMesos(status.getState))
+          && taskIdToSlaveId.contains(tid)) {
           // We lost the executor on this slave, so remember that it's gone
           removeExecutor(taskIdToSlaveId(tid), "Lost executor")
         }

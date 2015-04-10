@@ -21,8 +21,6 @@ import java.nio.ByteBuffer
 
 import org.scalatest.FunSuite
 
-import org.apache.spark.scheduler.cluster.mesos.MesosTaskLaunchData
-
 class MesosTaskLaunchDataSuite extends FunSuite {
   test("serialize and deserialize data must be same") {
     val serializedTask = ByteBuffer.allocate(40)

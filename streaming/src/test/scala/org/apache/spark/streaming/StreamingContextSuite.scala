@@ -100,7 +100,7 @@ class StreamingContextSuite extends FunSuite with BeforeAndAfter with Timeouts w
     assert(cp.sparkConfPairs.toMap.getOrElse("spark.cleaner.ttl", "-1") === "10")
     ssc1.stop()
     val newCp = Utils.deserialize[Checkpoint](Utils.serialize(cp))
-    assert(newCp.sparkConf.getInt("spark.cleaner.ttl", -1) === 10)
+    assert(newCp.createSparkConf().getInt("spark.cleaner.ttl", -1) === 10)
     ssc = new StreamingContext(null, newCp, null)
     assert(ssc.conf.getInt("spark.cleaner.ttl", -1) === 10)
   }
@@ -213,7 +213,7 @@ class StreamingContextSuite extends FunSuite with BeforeAndAfter with Timeouts w
     ssc = new StreamingContext(sc, Milliseconds(100))
     var runningCount = 0
     SlowTestReceiver.receivedAllRecords = false
-    //Create test receiver that sleeps in onStop()
+    // Create test receiver that sleeps in onStop()
     val totalNumRecords = 15
     val recordsPerSecond = 1
     val input = ssc.receiverStream(new SlowTestReceiver(totalNumRecords, recordsPerSecond))
@@ -370,7 +370,8 @@ object TestReceiver {
 }
 
 /** Custom receiver for testing whether a slow receiver can be shutdown gracefully or not */
-class SlowTestReceiver(totalRecords: Int, recordsPerSecond: Int) extends Receiver[Int](StorageLevel.MEMORY_ONLY) with Logging {
+class SlowTestReceiver(totalRecords: Int, recordsPerSecond: Int)
+  extends Receiver[Int](StorageLevel.MEMORY_ONLY) with Logging {
 
   var receivingThreadOption: Option[Thread] = None
 
