@@ -27,11 +27,9 @@ import com.google.common.collect.HashBiMap
 import scala.collection.JavaConversions._
 import scala.collection.mutable.{HashMap => MutableHashMap, HashSet => MutableHashSet}
 
-// import org.apache.mesos.{Scheduler => MScheduler}
 import org.apache.mesos._
 import org.apache.mesos.Protos.{TaskInfo => MesosTaskInfo, TaskState => MesosTaskState, _}
 
-// import org.apache.spark.{Logging, SparkContext, SparkEnv, SparkException}
 import org.apache.spark.{SparkContext, SparkEnv, SparkException}
 import org.apache.spark.scheduler.TaskSchedulerImpl
 import org.apache.spark.scheduler.cluster.CoarseGrainedSchedulerBackend
