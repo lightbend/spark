@@ -40,9 +40,10 @@ import org.apache.spark.util.{Utils, AkkaUtils}
  * Shared code between {@link FineGrainedMesosSchedulerBackend} and
  * {@link CoarseGrainedMesosSchedulerBackend}.
  */
-trait CommonMesosSchedulerBackend extends SchedulerBackend {
-
-  self: MScheduler with Logging =>
+trait CommonMesosSchedulerBackend
+  extends SchedulerBackend
+  with MScheduler
+  with Logging {
 
   // TODO Move these declarations somewhere else?
   def resourceOffers(d: SchedulerDriver, offers: JList[Offer]): Unit
@@ -109,11 +110,10 @@ trait CommonMesosSchedulerBackend extends SchedulerBackend {
     preStart()
 
     stateLock.synchronized {
+      val scheduler = this
       new Thread(s"$executorSimpleBackendName driver") {
         setDaemon(true)
         override def run() {
-          // i.e., val scheduler = CoarseGrainedMesosSchedulerBackend.this
-          val scheduler = self
           val fwInfo = FrameworkInfo.newBuilder().
             setUser(sparkContext.sparkUser).setName(sparkContext.appName).build()
           driver = new MesosSchedulerDriver(scheduler, fwInfo, master)

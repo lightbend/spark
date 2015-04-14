@@ -27,11 +27,12 @@ import com.google.common.collect.HashBiMap
 import scala.collection.JavaConversions._
 import scala.collection.mutable.{HashMap => MutableHashMap, HashSet => MutableHashSet}
 
-import org.apache.mesos.{Scheduler => MScheduler}
+// import org.apache.mesos.{Scheduler => MScheduler}
 import org.apache.mesos._
 import org.apache.mesos.Protos.{TaskInfo => MesosTaskInfo, TaskState => MesosTaskState, _}
 
-import org.apache.spark.{Logging, SparkContext, SparkEnv, SparkException}
+// import org.apache.spark.{Logging, SparkContext, SparkEnv, SparkException}
+import org.apache.spark.{SparkContext, SparkEnv, SparkException}
 import org.apache.spark.scheduler.TaskSchedulerImpl
 import org.apache.spark.scheduler.cluster.CoarseGrainedSchedulerBackend
 import org.apache.spark.util.{Utils, AkkaUtils}
@@ -51,9 +52,7 @@ private[spark] class CoarseGrainedMesosSchedulerBackend(
     val sparkContext: SparkContext,
     val master: String)
   extends CoarseGrainedSchedulerBackend(scheduler, sparkContext.env.rpcEnv)
-  with CommonMesosSchedulerBackend
-  with MScheduler
-  with Logging {
+  with CommonMesosSchedulerBackend {
 
   val MAX_SLAVE_FAILURES = 2     // Blacklist a slave after this many failures
 

@@ -25,13 +25,14 @@ import scala.collection.JavaConversions._
 import scala.collection.mutable.{HashMap, HashSet}
 
 import org.apache.mesos.protobuf.ByteString
-import org.apache.mesos.{Scheduler => MScheduler}
+// import org.apache.mesos.{Scheduler => MScheduler}
 import org.apache.mesos._
 import org.apache.mesos.Protos.{TaskInfo => MesosTaskInfo, TaskState => MesosTaskState,
   ExecutorInfo => MesosExecutorInfo, _}
 
 import org.apache.spark.executor.MesosExecutorBackend
-import org.apache.spark.{Logging, SparkContext, SparkException, TaskState}
+// import org.apache.spark.{Logging, SparkContext, SparkException, TaskState}
+import org.apache.spark.{SparkContext, SparkException, TaskState}
 import org.apache.spark.scheduler.cluster.ExecutorInfo
 import org.apache.spark.scheduler._
 import org.apache.spark.util.Utils
@@ -48,9 +49,7 @@ private[spark] class FineGrainedMesosSchedulerBackend(
     val scheduler: TaskSchedulerImpl,
     val sparkContext: SparkContext,
     val master: String)
-  extends CommonMesosSchedulerBackend
-  with MScheduler
-  with Logging {
+  extends CommonMesosSchedulerBackend {
 
   // An ExecutorInfo for our tasks
   var execArgs: Array[Byte] = null
