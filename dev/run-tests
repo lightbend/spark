@@ -28,6 +28,8 @@ rm -rf ~/.ivy2/cache/org.apache.spark
 
 source "$FWDIR/dev/run-tests-codes.sh"
 
+set -x
+
 CURRENT_BLOCK=$BLOCK_GENERAL
 
 function handle_error () {
