@@ -35,6 +35,7 @@ object MimaExcludes {
       version match {
         case v if v.startsWith("1.3") =>
           Seq(
+            ProblemFilters.excludePackage("org.spark-project.jetty"),
             MimaBuild.excludeSparkPackage("deploy"),
             MimaBuild.excludeSparkPackage("ml"),
             // These are needed if checking against the sbt build, since they are part of
