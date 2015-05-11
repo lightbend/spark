@@ -21,10 +21,10 @@ import java.io.File
 import java.util.{Collections, List => JList}
 import java.util.concurrent.locks.ReentrantLock
 
-import com.google.common.collect.HashBiMap
-
 import scala.collection.JavaConversions._
 import scala.collection.mutable.{HashMap, HashSet}
+
+import com.google.common.collect.HashBiMap
 
 import org.apache.mesos.Protos.{TaskInfo => MesosTaskInfo, _}
 import org.apache.mesos.{Scheduler => MScheduler, _}
@@ -99,7 +99,7 @@ private[spark] class CoarseMesosSchedulerBackend(
     startScheduler(master, CoarseMesosSchedulerBackend.this, fwInfo)
   }
 
-  def createCommand(offer: Offer, numCores: Int): CommandInfo = {
+  def createCommand(offer: Offer, numCores: Int, taskId: Int): CommandInfo = {
     val executorSparkHome = conf.getOption("spark.mesos.executor.home")
       .orElse(sc.getSparkHome())
       .getOrElse {
@@ -155,7 +155,7 @@ private[spark] class CoarseMesosSchedulerBackend(
         s"cd $basename*; $prefixEnv " +
          "./bin/spark-class org.apache.spark.executor.CoarseGrainedExecutorBackend" +
         s" --driver-url $driverURL" +
-        s" --executor-id ${offer.getSlaveId.getValue}" +
+        s" --executor-id ${sparkExecutorId(offer.getSlaveId.getValue, taskId.toString)}" +
         s" --hostname ${offer.getHostname}" +
         s" --cores $numCores" +
         s" --app-id $appId")
@@ -213,7 +213,7 @@ private[spark] class CoarseMesosSchedulerBackend(
           val task = MesosTaskInfo.newBuilder()
             .setTaskId(TaskID.newBuilder().setValue(taskId.toString).build())
             .setSlaveId(offer.getSlaveId)
-            .setCommand(createCommand(offer, cpusToUse + extraCoresPerSlave))
+            .setCommand(createCommand(offer, cpusToUse + extraCoresPerSlave, taskId))
             .setName("Task " + taskId)
             .addResources(createResource("cpus", cpusToUse))
             .addResources(createResource("mem",
@@ -350,14 +350,12 @@ private[spark] class CoarseMesosSchedulerBackend(
       }
     }
 
-    assert(pendingRemovedSlaveIds.size <= taskIdToSlaveId.size)
-
     // We cannot simply decrement from the existing executor limit as we may not able to
     // launch as much executors as the limit. But we assume if we are notified to kill
     // executors, that means the scheduler wants to set the limit that is less than
     // the amount of the executors that has been launched. Therefore, we take the existing
     // amount of executors launched and deduct the executors killed as the new limit.
-    executorLimitOption = Option(taskIdToSlaveId.size - pendingRemovedSlaveIds.size)
+    executorLimitOption = Option(Math.max(0, taskIdToSlaveId.size - pendingRemovedSlaveIds.size))
     true
   }
 }
