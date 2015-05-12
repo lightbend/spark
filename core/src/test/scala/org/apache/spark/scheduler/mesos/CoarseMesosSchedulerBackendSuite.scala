@@ -67,7 +67,7 @@ class CoarseMesosSchedulerBackendSuite extends FunSuite
   }
 
   private def createSchedulerBackend(taskScheduler: TaskSchedulerImpl,
-    driver: MesosSchedulerDriver): CoarseMesosSchedulerBackend = {
+    driver: SchedulerDriver): CoarseMesosSchedulerBackend = {
     val backend = new CoarseMesosSchedulerBackend(taskScheduler, sc, "master") {
       override def driverURL = "driverURL"
       mesosDriver = driver
@@ -89,7 +89,7 @@ class CoarseMesosSchedulerBackendSuite extends FunSuite
   }
 
   test("mesos supports killing and limiting executors") {
-    val driver = mock[MesosSchedulerDriver]
+    val driver = mock[SchedulerDriver]
     val taskScheduler = mock[TaskSchedulerImpl]
     when(taskScheduler.sc).thenReturn(sc)
 
@@ -140,7 +140,7 @@ class CoarseMesosSchedulerBackendSuite extends FunSuite
   }
 
   test("mesos supports killing and relaunching tasks with executors") {
-    val driver = mock[MesosSchedulerDriver]
+    val driver = mock[SchedulerDriver]
     val taskScheduler = mock[TaskSchedulerImpl]
     when(taskScheduler.sc).thenReturn(sc)
 
