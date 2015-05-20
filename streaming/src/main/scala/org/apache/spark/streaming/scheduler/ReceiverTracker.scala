@@ -142,6 +142,7 @@ class ReceiverTracker(ssc: StreamingContext, skipReceiverLaunch: Boolean = false
   def refreshLatestSpeeds(batchTime: Time, streamIdToElemsPerBatch: Map[Int, Long]){
     val blockIntervalMs = ssc.conf.getTimeAsMs("spark.streaming.blockInterval", "200ms")
     val ratio = blockIntervalMs.toFloat / ssc.graph.batchDuration.milliseconds
+
     for {(sId, speed) <- streamIdToElemsPerBatch
         info <- receiverInfo.get(sId)
         eP <- Option(info.endpoint)}

@@ -66,6 +66,9 @@ private[streaming] class ReceiverSupervisorImpl(
 
     strategyNameOption.map {
       case "ignore" => new IgnoreCongestionStrategy()
+      case "pushback" => new PushBackCongestionStrategy(blockGenerator.blockIntervalMs)
+      case "drop" => new DropCongestionStrategy()
+      case "sampling" => new SamplingCongestionStrategy()
       case _ => new IgnoreCongestionStrategy()
     }.getOrElse {
      new IgnoreCongestionStrategy()
@@ -98,6 +101,10 @@ private[streaming] class ReceiverSupervisorImpl(
 
   /** Divides received data records into data blocks for pushing in BlockManager. */
   private val blockGenerator = new BlockGenerator(new BlockGeneratorListener {
+
+    override def onBlockGeneration(currentBuffer: ArrayBuffer[Any], newBlockBuffer: ArrayBuffer[Any]) =
+      congestionStrategy.restrictCurrentBuffer(currentBuffer, newBlockBuffer)
+
     def onAddData(data: Any, metadata: Any): Unit = { }
 
     def onGenerateBlock(blockId: StreamBlockId): Unit = { }

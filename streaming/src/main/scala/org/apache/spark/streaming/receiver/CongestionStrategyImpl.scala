@@ -18,6 +18,9 @@
 package org.apache.spark.streaming.receiver
 
 import scala.collection.mutable.ArrayBuffer
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.Random
+import org.apache.spark.util.random.BernoulliSampler
 
 /**
  * This class provides a congestion strategy that ignores
@@ -30,4 +33,67 @@ class IgnoreCongestionStrategy extends CongestionStrategy {
 
   override def restrictCurrentBuffer(currentBuffer: ArrayBuffer[Any],
                                      nextBuffer: ArrayBuffer[Any]): Unit = {}
+}
+
+class PushBackCongestionStrategy(blockInterval: Long) extends CongestionStrategy {
+
+  private val latestBound = new AtomicInteger(-1)
+
+  override def onBlockBoundUpdate(bound: Int): Unit = latestBound.set(bound)
+
+  override def restrictCurrentBuffer(currentBuffer: ArrayBuffer[Any],
+                                     nextBuffer: ArrayBuffer[Any]): Unit = {
+    val bound = latestBound.get()
+    val difference = currentBuffer.size - bound
+    if (bound > 0 && difference > 0) {
+      nextBuffer ++=: currentBuffer.takeRight(difference)
+      currentBuffer.reduceToSize(bound)
+    }
+    // We've had our fill for the amount of time it would take us to process the difference.
+    // Use the fact this is synchronized with data ingestion to prevent more data coming in.
+    // We need to wait for quite less than the block interval for the next 'clock tick'
+    // (and block generation) to occur normally : this only leaves 5% of the block interval
+    // during which data can 'sneak in'
+    val delay = math.round( blockInterval * math.min((difference.toFloat / bound), 0.9) )
+    Thread.sleep(delay)
+  }
+
+}
+
+class DropCongestionStrategy extends CongestionStrategy {
+
+  private val latestBound = new AtomicInteger(-1)
+
+  override def onBlockBoundUpdate(bound: Int): Unit = latestBound.set(bound)
+
+  override def restrictCurrentBuffer(currentBuffer: ArrayBuffer[Any],
+                                     nextBuffer: ArrayBuffer[Any]): Unit = {
+    val bound = latestBound.get()
+    val difference = currentBuffer.size - bound
+    if (bound > 0 && difference > 0) {
+      currentBuffer.reduceToSize(bound)
+    }
+  }
+
+}
+
+class SamplingCongestionStrategy extends CongestionStrategy {
+
+  private val latestBound = new AtomicInteger(-1)
+
+  override def onBlockBoundUpdate(bound: Int): Unit = latestBound.set(bound)
+
+  override def restrictCurrentBuffer(currentBuffer: ArrayBuffer[Any],
+                                     nextBuffer: ArrayBuffer[Any]): Unit = {
+    val bound = latestBound.get()
+    val f = bound.toDouble / currentBuffer.size
+    val samplees = currentBuffer.to
+
+    val sampled = new BernoulliSampler(f).sample(samplees.toIterator)
+
+    currentBuffer.clear()
+    currentBuffer ++= sampled
+
+  }
+
 }
