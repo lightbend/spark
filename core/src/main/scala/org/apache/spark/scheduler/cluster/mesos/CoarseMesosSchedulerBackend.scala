@@ -327,7 +327,8 @@ private[spark] class CoarseMesosSchedulerBackend(
   override def doRequestTotalExecutors(requestedTotal: Int): Boolean = {
     // We don't truly know if we can fulfill the full amount of executors
     // since at coarse grain it depends on the amount of slaves available.
-    logInfo("Capping the total amount of executors to " + requestedTotal)
+    if (executorLimitOption.map(_ != requestedTotal).getOrElse(true))
+      logInfo("Capping the total amount of executors to " + requestedTotal)
     executorLimitOption = Option(requestedTotal)
     true
   }
