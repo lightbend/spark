@@ -202,6 +202,14 @@ class BlockManagerMaster(
     Await.result(future, timeout)
   }
 
+  /**
+   * Return all block managers that were known to this block manager master, even if
+   * they de-registered in the meantime.
+   */
+  def getAllBlockManagers: Set[BlockManagerId] = {
+    driverEndpoint.askWithRetry[Set[BlockManagerId]](GetAllBlockManagers)
+  }
+
   /** Stop the driver endpoint, called only on the Spark driver node */
   def stop() {
     if (driverEndpoint != null && isDriver) {

@@ -34,6 +34,7 @@ import org.apache.spark.network.server.StreamManager;
 import org.apache.spark.network.shuffle.protocol.BlockTransferMessage;
 import org.apache.spark.network.shuffle.protocol.OpenBlocks;
 import org.apache.spark.network.shuffle.protocol.RegisterExecutor;
+import org.apache.spark.network.shuffle.protocol.RemoveApplication;
 import org.apache.spark.network.shuffle.protocol.StreamHandle;
 
 /**
@@ -80,6 +81,11 @@ public class ExternalShuffleBlockHandler extends RpcHandler {
     } else if (msgObj instanceof RegisterExecutor) {
       RegisterExecutor msg = (RegisterExecutor) msgObj;
       blockManager.registerExecutor(msg.appId, msg.execId, msg.executorInfo);
+      callback.onSuccess(new byte[0]);
+
+    } else if (msgObj instanceof RemoveApplication) {
+      RemoveApplication msg = (RemoveApplication) msgObj;
+      applicationRemoved(msg.appId, msg.cleanLocalDirs);
       callback.onSuccess(new byte[0]);
 
     } else {

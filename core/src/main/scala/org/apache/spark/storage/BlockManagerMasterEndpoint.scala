@@ -42,8 +42,14 @@ class BlockManagerMasterEndpoint(
     listenerBus: LiveListenerBus)
   extends ThreadSafeRpcEndpoint with Logging {
 
+  private val externalShuffleService: Boolean =
+    conf.getBoolean("spark.shuffle.service.enabled", false)
+
   // Mapping from block manager id to the block manager's information.
   private val blockManagerInfo = new mutable.HashMap[BlockManagerId, BlockManagerInfo]
+
+  // all shuffle service endpoints where we had data during this run
+  private val shuffleServiceEndpoints = new mutable.HashSet[BlockManagerId]
 
   // Mapping from executor ID to block manager ID.
   private val blockManagerIdByExecutor = new mutable.HashMap[String, BlockManagerId]
@@ -112,6 +118,8 @@ class BlockManagerMasterEndpoint(
     case BlockManagerHeartbeat(blockManagerId) =>
       context.reply(heartbeatReceived(blockManagerId))
 
+    case GetAllBlockManagers =>
+      context.reply(shuffleServiceEndpoints.toSet)
   }
 
   private def removeRdd(rddId: Int): Future[Seq[Int]] = {
@@ -292,18 +300,20 @@ class BlockManagerMasterEndpoint(
       blockManagerIdByExecutor.get(id.executorId) match {
         case Some(oldId) =>
           // A block manager of the same executor already exists, so remove it (assumed dead)
-          logError("Got two different block manager registrations on same executor - " 
+          logError("Got two different block manager registrations on same executor - "
               + s" will replace old one $oldId with new one $id")
-          removeExecutor(id.executorId)  
+          removeExecutor(id.executorId)
         case None =>
       }
       logInfo("Registering block manager %s with %s RAM, %s".format(
         id.hostPort, Utils.bytesToString(maxMemSize), id))
-      
+
       blockManagerIdByExecutor(id.executorId) = id
-      
+
       blockManagerInfo(id) = new BlockManagerInfo(
         id, System.currentTimeMillis(), maxMemSize, slaveEndpoint)
+
+      shuffleServiceEndpoints += id
     }
     listenerBus.post(SparkListenerBlockManagerAdded(time, id, maxMemSize))
   }

@@ -66,6 +66,9 @@ class NettyBlockRpcServer(
         val data = new NioManagedBuffer(ByteBuffer.wrap(uploadBlock.blockData))
         blockManager.putBlockData(BlockId(uploadBlock.blockId), data, level)
         responseContext.onSuccess(new Array[Byte](0))
+
+      case _ =>
+        logError(s"Received unknown message $message")
     }
   }
 
