@@ -34,6 +34,7 @@ import org.apache.spark.network.sasl.SecretKeyHolder;
 import org.apache.spark.network.server.NoOpRpcHandler;
 import org.apache.spark.network.shuffle.protocol.ExecutorShuffleInfo;
 import org.apache.spark.network.shuffle.protocol.RegisterExecutor;
+import org.apache.spark.network.shuffle.protocol.RemoveApplication;
 import org.apache.spark.network.util.TransportConf;
 
 /**
@@ -136,6 +137,26 @@ public class ExternalShuffleClient extends ShuffleClient {
     TransportClient client = clientFactory.createClient(host, port);
     byte[] registerMessage = new RegisterExecutor(appId, execId, executorInfo).toByteArray();
     client.sendRpcSync(registerMessage, 5000 /* timeoutMs */);
+  }
+
+  /**
+   * Removes this application from the external shuffle server and optionally deletes local
+   * files.
+   *
+   * @param host Host of the shuffle server.
+   * @param port Port of the shuffle server.
+   * @param cleanupLocalDirs True if corresponding shuffle files should be deleted
+   * @throws IOException
+   */
+  public void applicationRemoved(String host,
+      int port,
+      boolean cleanupLocalDirs) throws IOException {
+    assert appId != null : "Called before init()";
+    TransportClient client = clientFactory.createClient(host, port);
+    byte[] message = new RemoveApplication(appId, cleanupLocalDirs).toByteArray();
+
+    // TODO make this call async
+    client.sendRpcSync(message, 5000 /* timeoutMs */);
   }
 
   @Override

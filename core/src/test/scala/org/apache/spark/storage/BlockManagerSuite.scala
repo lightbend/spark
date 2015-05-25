@@ -25,24 +25,27 @@ import scala.concurrent.duration._
 import scala.language.implicitConversions
 import scala.language.postfixOps
 
-import org.mockito.Mockito.{mock, when}
+import org.mockito.Mockito.{timeout => _, _}
+import org.mockito.Matchers._
 import org.scalatest._
 import org.scalatest.concurrent.Eventually._
 import org.scalatest.concurrent.Timeouts._
+import org.scalatest.mock.MockitoSugar
 
 import org.apache.spark.rpc.RpcEnv
 import org.apache.spark.{MapOutputTrackerMaster, SparkConf, SparkContext, SecurityManager}
 import org.apache.spark.executor.DataReadMethod
 import org.apache.spark.network.nio.NioBlockTransferService
+import org.apache.spark.network.shuffle.ShuffleClient
+import org.apache.spark.network.shuffle.ExternalShuffleClient
 import org.apache.spark.scheduler.LiveListenerBus
 import org.apache.spark.serializer.{JavaSerializer, KryoSerializer}
 import org.apache.spark.shuffle.hash.HashShuffleManager
 import org.apache.spark.storage.BlockManagerMessages.BlockManagerHeartbeat
 import org.apache.spark.util._
 
-
 class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
-  with PrivateMethodTester with ResetSystemProperties {
+  with PrivateMethodTester with ResetSystemProperties with MockitoSugar {
 
   private val conf = new SparkConf(false)
   var store: BlockManager = null
@@ -64,10 +67,11 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
 
   private def makeBlockManager(
       maxMem: Long,
-      name: String = SparkContext.DRIVER_IDENTIFIER): BlockManager = {
+      name: String = SparkContext.DRIVER_IDENTIFIER,
+      shuffleClient: Option[ShuffleClient] = None): BlockManager = {
     val transfer = new NioBlockTransferService(conf, securityMgr)
     val manager = new BlockManager(name, rpcEnv, master, serializer, maxMem, conf,
-      mapOutputTracker, shuffleManager, transfer, securityMgr, 0)
+      mapOutputTracker, shuffleManager, transfer, securityMgr, 0, shuffleClient)
     manager.initialize("app-id")
     manager
   }
@@ -814,7 +818,7 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
     // This sequence of mocks makes these tests fairly brittle. It would
     // be nice to refactor classes involved in disk storage in a way that
     // allows for easier testing.
-    val blockManager = mock(classOf[BlockManager])
+    val blockManager = mock[BlockManager]
     when(blockManager.conf).thenReturn(conf.clone.set(confKey, "0"))
     val diskBlockManager = new DiskBlockManager(blockManager, conf)
 
@@ -1250,5 +1254,40 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
     assert(result.size === 10000)
     assert(result.data === Right(bytes))
     assert(result.droppedBlocks === Nil)
+  }
+
+  test("block managers are correctly recorded by the master") {
+    store = makeBlockManager(1200, "b1")
+    store2 = makeBlockManager(1200, "b2")
+
+    val managers = master.getAllBlockManagers
+    assert(managers.size === 2, "Not all block managers were returned")
+  }
+
+  test("block managers are remembered after being shut down") {
+    store = makeBlockManager(1200, "b1")
+    store2 = makeBlockManager(1200, "b2")
+
+    master.removeExecutor(store.blockManagerId.executorId)
+
+    val managers = master.getAllBlockManagers
+    assert(managers.size === 2, "Not all block managers were returned")
+  }
+
+  test("application is removed when master shuts down") {
+    try {
+      conf.set("spark.shuffle.service.enabled", "true")
+
+      val client: ExternalShuffleClient = mock[ExternalShuffleClient]
+      store = makeBlockManager(1200, shuffleClient = Option(client))
+      store2 = makeBlockManager(1200, "b2", Option(client))
+
+      store.stop()
+      store = null
+
+      verify(client, times(2)).applicationRemoved(any(), any(), org.mockito.Matchers.eq(true))
+    } finally {
+      conf.set("spark.shuffle.service.enabled", "false")
+    }
   }
 }

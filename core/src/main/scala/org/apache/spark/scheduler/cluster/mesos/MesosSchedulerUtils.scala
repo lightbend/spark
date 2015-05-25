@@ -19,11 +19,9 @@ package org.apache.spark.scheduler.cluster.mesos
 
 import java.util.List
 import java.util.concurrent.CountDownLatch
-
 import scala.collection.JavaConversions._
-
 import org.apache.mesos.Protos.{FrameworkInfo, Resource, Status}
-import org.apache.mesos.{MesosSchedulerDriver, Scheduler}
+import org.apache.mesos.{MesosSchedulerDriver, SchedulerDriver, Scheduler}
 import org.apache.spark.Logging
 import org.apache.spark.util.Utils
 
@@ -36,7 +34,7 @@ private[mesos] trait MesosSchedulerUtils extends Logging {
   private final val registerLatch = new CountDownLatch(1)
 
   // Driver for talking to Mesos
-  protected var mesosDriver: MesosSchedulerDriver = null
+  protected var mesosDriver: SchedulerDriver = null
 
   /**
    * Starts the MesosSchedulerDriver with the provided information. This method returns

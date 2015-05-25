@@ -17,7 +17,7 @@
 
 package org.apache.spark.storage
 
-import java.io.{BufferedOutputStream, ByteArrayOutputStream, File, InputStream, OutputStream}
+import java.io._
 import java.nio.{ByteBuffer, MappedByteBuffer}
 
 import scala.collection.mutable.{ArrayBuffer, HashMap}
@@ -34,6 +34,7 @@ import org.apache.spark.network._
 import org.apache.spark.network.buffer.{ManagedBuffer, NioManagedBuffer}
 import org.apache.spark.network.netty.SparkTransportConf
 import org.apache.spark.network.shuffle.ExternalShuffleClient
+import org.apache.spark.network.shuffle.ShuffleClient
 import org.apache.spark.network.shuffle.protocol.ExecutorShuffleInfo
 import org.apache.spark.rpc.RpcEnv
 import org.apache.spark.serializer.{SerializerInstance, Serializer}
@@ -69,7 +70,8 @@ private[spark] class BlockManager(
     shuffleManager: ShuffleManager,
     blockTransferService: BlockTransferService,
     securityManager: SecurityManager,
-    numUsableCores: Int)
+    numUsableCores: Int,
+    mockShuffleClient: Option[ShuffleClient] = None)
   extends BlockDataManager with Logging {
 
   val diskBlockManager = new DiskBlockManager(this, conf)
@@ -111,12 +113,19 @@ private[spark] class BlockManager(
 
   // Client to read other executors' shuffle files. This is either an external service, or just the
   // standard BlockTransferService to directly connect to other Executors.
-  private[spark] val shuffleClient = if (externalShuffleServiceEnabled) {
-    val transConf = SparkTransportConf.fromSparkConf(conf, numUsableCores)
-    new ExternalShuffleClient(transConf, securityManager, securityManager.isAuthenticationEnabled(),
-      securityManager.isSaslEncryptionEnabled())
-  } else {
-    blockTransferService
+  private[spark] val shuffleClient = mockShuffleClient.getOrElse(createShuffleClient)
+
+  private def createShuffleClient: ShuffleClient = {
+    if (externalShuffleServiceEnabled) {
+      val transConf = SparkTransportConf.fromSparkConf(conf, numUsableCores)
+      new ExternalShuffleClient(
+        transConf,
+        securityManager,
+        securityManager.isAuthenticationEnabled(),
+        securityManager.isSaslEncryptionEnabled())
+    } else {
+      blockTransferService
+    }
   }
 
   // Whether to compress broadcast variables that are stored
@@ -489,16 +498,17 @@ private[spark] class BlockManager(
         if (level.useOffHeap) {
           logDebug(s"Getting block $blockId from ExternalBlockStore")
           if (externalBlockStore.contains(blockId)) {
-            externalBlockStore.getBytes(blockId) match {
-              case Some(bytes) =>
-                if (!asBlockResult) {
-                  return Some(bytes)
-                } else {
-                  return Some(new BlockResult(
-                    dataDeserialize(blockId, bytes), DataReadMethod.Memory, info.size))
-                }
+            val result = if (asBlockResult) {
+              externalBlockStore.getValues(blockId)
+                .map(new BlockResult(_, DataReadMethod.Memory, info.size))
+            } else {
+              externalBlockStore.getBytes(blockId)
+            }
+            result match {
+              case Some(values) =>
+                return result
               case None =>
-                logDebug(s"Block $blockId not found in externalBlockStore")
+                logDebug(s"Block $blockId not found in ExternalBlockStore")
             }
           }
         }
@@ -1206,11 +1216,25 @@ private[spark] class BlockManager(
       bytes: ByteBuffer,
       serializer: Serializer = defaultSerializer): Iterator[Any] = {
     bytes.rewind()
-    val stream = wrapForCompression(blockId, new ByteBufferInputStream(bytes, true))
-    serializer.newInstance().deserializeStream(stream).asIterator
+    dataDeserializeStream(blockId, new ByteBufferInputStream(bytes, true), serializer)
+  }
+
+  /**
+   * Deserializes a InputStream into an iterator of values and disposes of it when the end of
+   * the iterator is reached.
+   */
+  def dataDeserializeStream(
+      blockId: BlockId,
+      inputStream: InputStream,
+      serializer: Serializer = defaultSerializer): Iterator[Any] = {
+    val stream = new BufferedInputStream(inputStream)
+    serializer.newInstance().deserializeStream(wrapForCompression(blockId, stream)).asIterator
   }
 
   def stop(): Unit = {
+    if ((blockManagerId ne null) && blockManagerId.isDriver) {
+      cleanupAllShuffleFiles()
+    }
     blockTransferService.close()
     if (shuffleClient ne blockTransferService) {
       // Closing should be idempotent, but maybe not for the NioBlockTransferService.
@@ -1229,8 +1253,37 @@ private[spark] class BlockManager(
     futureExecutionContext.shutdownNow()
     logInfo("BlockManager stopped")
   }
-}
 
+  /**
+   * Contact all external shuffle services and de-register this application, cleaning
+   * shuffle files as well.
+   *
+   * This is required in Mesos mode with dynamic allocation, since executors leave behind
+   * shuffle files to be served by the external shuffle service. We need to delete those
+   * files when the application stops.
+   */
+  private def cleanupAllShuffleFiles() {
+    if (externalShuffleServiceEnabled) {
+      val workerNodes = master.getAllBlockManagers
+      logInfo(s"Cleaning up shuffle files on ${workerNodes.size} nodes.")
+
+      for (node <- workerNodes) {
+        val host = node.host
+        val port = externalShuffleServicePort
+        logDebug(s"Removing this application from $host:$port.")
+        try {
+          shuffleClient
+            .asInstanceOf[ExternalShuffleClient]
+            .applicationRemoved(host, port, true)
+        } catch {
+          case e: IOException =>
+            logError(s"Error removing application from $host:$port", e)
+        }
+      }
+    }
+  }
+
+}
 
 private[spark] object BlockManager extends Logging {
   private val ID_GENERATOR = new IdGenerator
