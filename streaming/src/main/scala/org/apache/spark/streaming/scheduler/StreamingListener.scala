@@ -18,9 +18,10 @@
 package org.apache.spark.streaming.scheduler
 
 import scala.collection.mutable.Queue
-
 import org.apache.spark.util.Distribution
 import org.apache.spark.annotation.DeveloperApi
+import org.apache.spark.streaming.Duration
+import org.apache.spark.streaming.Time
 
 /**
  * :: DeveloperApi ::
@@ -77,6 +78,36 @@ trait StreamingListener {
   def onBatchCompleted(batchCompleted: StreamingListenerBatchCompleted) { }
 }
 
+/**
+ * :: DeveloperApi ::
+ * A StreamingListener that estimates the number of elements that the previous
+ * batch would have processed, for each stream, if the duration of computation
+ * was one batchDuration.
+ * @param batchDuration The nominal (yardstick) duration for computation.
+ */
+@DeveloperApi
+class LatestSpeedListener(batchDuration: Duration) extends StreamingListener {
+  var latestTime : Option[Time] = None
+  var streamIdToElemsPerBatch: Option[Map[Int, Long]] = None
+
+  override def onBatchCompleted(batchCompleted: StreamingListenerBatchCompleted){
+    this.synchronized{
+      val newTime = batchCompleted.batchInfo.batchTime
+      val delay = batchCompleted.batchInfo.processingDelay
+      if (latestTime.isEmpty || newTime > latestTime.get && delay.isDefined){
+        latestTime = Some(newTime)
+        val ratio = delay.get.toDouble / batchDuration.milliseconds
+        val elements = batchCompleted.batchInfo.streamIdToNumRecords
+        streamIdToElemsPerBatch = Some(elements.mapValues{ x => math.round(x / ratio) })
+      }
+    }
+  }
+
+  def getSpeedForStreamId(streamId:Int): Option[Long] = {
+    streamIdToElemsPerBatch.flatMap(_.get(streamId))
+  }
+
+}
 
 /**
  * :: DeveloperApi ::

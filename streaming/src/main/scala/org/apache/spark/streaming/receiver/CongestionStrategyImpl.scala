@@ -17,12 +17,17 @@
 
 package org.apache.spark.streaming.receiver
 
-import org.apache.spark.streaming.Time
+import scala.collection.mutable.ArrayBuffer
 
-/** Messages sent to the Receiver. */
-private[streaming] sealed trait ReceiverMessage extends Serializable
-private[streaming] object StopReceiver extends ReceiverMessage
-private[streaming] case class CleanupOldBlocks(threshTime: Time) extends ReceiverMessage
-private[streaming] case class BatchProcessingSpeedInfo(batchTime: Time, elementsPerBlock: Int)
-  extends ReceiverMessage
+/**
+ * This class provides a congestion strategy that ignores
+ * any back-pressure information.
+ * @see CongestionStrategy
+ */
+class IgnoreCongestionStrategy extends CongestionStrategy {
 
+  override def onBlockBoundUpdate(bound: Int) {}
+
+  override def restrictCurrentBuffer(currentBuffer: ArrayBuffer[Any],
+                                     nextBuffer: ArrayBuffer[Any]): Unit = {}
+}

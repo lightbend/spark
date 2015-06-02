@@ -20,16 +20,16 @@ package org.apache.spark.streaming
 import scala.collection.mutable.{ArrayBuffer, SynchronizedBuffer}
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
-
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.dstream.DStream
 import org.apache.spark.streaming.receiver.Receiver
 import org.apache.spark.streaming.scheduler._
-
 import org.scalatest.Matchers
 import org.scalatest.concurrent.Eventually._
 import org.scalatest.time.SpanSugar._
 import org.apache.spark.Logging
+
+
 
 class StreamingListenerSuite extends TestSuiteBase with Matchers {
 
@@ -129,6 +129,32 @@ class StreamingListenerSuite extends TestSuiteBase with Matchers {
     } finally {
       ssc.stop()
     }
+  }
+
+  test("latest speed reporting") {
+    val midInput = (1 to 4).map(Seq(_)).toSeq
+    val midSsc = setupStreams(midInput, operation)
+    val midLatestSpeed = new LatestSpeedListener(batchDuration)
+    midSsc.addStreamingListener(midLatestSpeed)
+    runStreams(midSsc, input.size, input.size)
+
+    val speeds = midLatestSpeed.streamIdToElemsPerBatch
+    speeds should not be None
+    speeds.get should have size 1
+    val midSp = midLatestSpeed.getSpeedForStreamId(0)
+
+    // between two batch sizes that are both below the system's limits,
+    // the estimate of elements processed per batch should be comparable
+    val bigInput = (1 to 40).map(Seq(_)).toSeq
+    val bigSsc = setupStreams(bigInput, operation)
+    val bigLatestSpeed = new LatestSpeedListener(batchDuration)
+    bigSsc.addStreamingListener(bigLatestSpeed)
+    runStreams(bigSsc, bigInput.size, bigInput.size)
+
+    val bigSp = bigLatestSpeed.getSpeedForStreamId(0)
+    bigSp should not be empty
+    midSp should not be empty
+    bigSp.get should (be >= (midSp.get / 2) and be <= (midSp.get * 2))
   }
 
   /** Check if a sequence of numbers is in increasing order */
