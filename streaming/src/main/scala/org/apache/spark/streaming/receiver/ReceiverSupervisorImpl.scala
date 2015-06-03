@@ -102,7 +102,8 @@ private[streaming] class ReceiverSupervisorImpl(
   /** Divides received data records into data blocks for pushing in BlockManager. */
   private val blockGenerator = new BlockGenerator(new BlockGeneratorListener {
 
-    override def onBlockGeneration(currentBuffer: ArrayBuffer[Any], newBlockBuffer: ArrayBuffer[Any]) =
+    override def onBlockGeneration(currentBuffer: ArrayBuffer[Any],
+                 newBlockBuffer: ArrayBuffer[Any]): Unit =
       congestionStrategy.restrictCurrentBuffer(currentBuffer, newBlockBuffer)
 
     def onAddData(data: Any, metadata: Any): Unit = { }
