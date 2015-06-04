@@ -20,7 +20,7 @@ package org.apache.spark.streaming.receiver
 import scala.collection.mutable.ArrayBuffer
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.Random
-import org.apache.spark.util.random.BernoulliSampler
+import org.apache.spark.util.random.{RandomSampler, BernoulliSampler}
 
 /**
  * This class provides a congestion strategy that ignores
@@ -79,6 +79,8 @@ class DropCongestionStrategy extends CongestionStrategy {
 
 class SamplingCongestionStrategy extends CongestionStrategy {
 
+  private val rng = RandomSampler.newDefaultRNG
+
   private val latestBound = new AtomicInteger(-1)
 
   override def onBlockBoundUpdate(bound: Int): Unit = latestBound.set(bound)
@@ -89,7 +91,7 @@ class SamplingCongestionStrategy extends CongestionStrategy {
     val f = bound.toDouble / currentBuffer.size
     val samplees = currentBuffer.to
 
-    val sampled = new BernoulliSampler(f).sample(samplees.toIterator)
+    val sampled = new BernoulliSampler(f, rng).sample(samplees.toIterator)
 
     currentBuffer.clear()
     currentBuffer ++= sampled
