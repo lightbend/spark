@@ -67,6 +67,7 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
     eventLoop.start()
 
     listenerBus.start(ssc.sparkContext)
+    ssc.addStreamingListener(ssc.speedListener)
     receiverTracker = new ReceiverTracker(ssc)
     inputInfoTracker = new InputInfoTracker(ssc)
     receiverTracker.start()
@@ -169,6 +170,9 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
             jobSet.processingDelay / 1000.0
           ))
           listenerBus.post(StreamingListenerBatchCompleted(jobSet.toBatchInfo))
+          for { time <- ssc.speedListener.latestTime
+                speeds <- ssc.speedListener.streamIdToElemsPerBatch}
+            receiverTracker.refreshLatestSpeeds(time, speeds)
         }
       case Failure(e) =>
         reportError("Error running job " + job, e)

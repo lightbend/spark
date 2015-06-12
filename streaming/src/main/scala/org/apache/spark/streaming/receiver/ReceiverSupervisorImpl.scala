@@ -61,6 +61,19 @@ private[streaming] class ReceiverSupervisorImpl(
     }
   }
 
+  protected val congestionStrategy: CongestionStrategy = {
+    val strategyNameOption = env.conf.getOption("spark.streaming.receiver.congestionStrategy")
+
+    strategyNameOption.map {
+      case "ignore" => new IgnoreCongestionStrategy()
+      case "pushback" => new PushBackCongestionStrategy(blockGenerator.blockIntervalMs)
+      case "drop" => new DropCongestionStrategy()
+      case "sampling" => new SamplingCongestionStrategy()
+      case _ => new IgnoreCongestionStrategy()
+    }.getOrElse {
+     new IgnoreCongestionStrategy()
+    }
+  }
 
   /** Remote RpcEndpointRef for the ReceiverTracker */
   private val trackerEndpoint = RpcUtils.makeDriverRef("ReceiverTracker", env.conf, env.rpcEnv)
@@ -77,6 +90,9 @@ private[streaming] class ReceiverSupervisorImpl(
         case CleanupOldBlocks(threshTime) =>
           logDebug("Received delete old batch signal")
           cleanupOldBlocks(threshTime)
+        case BatchProcessingSpeedInfo(batchTime, elemsPerBlock) =>
+          congestionStrategy.onBlockBoundUpdate(elemsPerBlock)
+          logDebug(s"Received update for $streamId at ${batchTime.milliseconds} : $elemsPerBlock")
       }
     })
 
@@ -85,6 +101,11 @@ private[streaming] class ReceiverSupervisorImpl(
 
   /** Divides received data records into data blocks for pushing in BlockManager. */
   private val blockGenerator = new BlockGenerator(new BlockGeneratorListener {
+
+    override def onBlockGeneration(currentBuffer: ArrayBuffer[Any],
+                 newBlockBuffer: ArrayBuffer[Any]): Unit =
+      congestionStrategy.restrictCurrentBuffer(currentBuffer, newBlockBuffer)
+
     def onAddData(data: Any, metadata: Any): Unit = { }
 
     def onGenerateBlock(blockId: StreamBlockId): Unit = { }
