@@ -41,7 +41,7 @@ import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.StreamingContextState._
 import org.apache.spark.streaming.dstream._
 import org.apache.spark.streaming.receiver.{ActorReceiver, ActorSupervisorStrategy, Receiver}
-import org.apache.spark.streaming.scheduler.{JobScheduler, StreamingListener}
+import org.apache.spark.streaming.scheduler.{JobScheduler, StreamingListener, LatestSpeedListener}
 import org.apache.spark.streaming.ui.{StreamingJobProgressListener, StreamingTab}
 import org.apache.spark.util.{CallSite, Utils}
 
@@ -184,6 +184,8 @@ class StreamingContext private[streaming] (
   private[streaming] val waiter = new ContextWaiter
 
   private[streaming] val progressListener = new StreamingJobProgressListener(this)
+
+  private[streaming] val speedListener = new LatestSpeedListener(this.graph.batchDuration)
 
   private[streaming] val uiTab: Option[StreamingTab] =
     if (conf.getBoolean("spark.ui.enabled", true)) {

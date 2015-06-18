@@ -25,6 +25,7 @@ import org.apache.spark.{Logging, SerializableWritable, SparkEnv, SparkException
 import org.apache.spark.rpc._
 import org.apache.spark.streaming.{StreamingContext, Time}
 import org.apache.spark.streaming.receiver.{CleanupOldBlocks, Receiver, ReceiverSupervisorImpl, StopReceiver}
+import org.apache.spark.streaming.receiver.BatchProcessingSpeedInfo
 
 /**
  * Messages used by the NetworkReceiver and the ReceiverTracker to communicate
@@ -132,6 +133,20 @@ class ReceiverTracker(ssc: StreamingContext, skipReceiverLaunch: Boolean = false
       receiverInfo.values.flatMap { info => Option(info.endpoint) }
         .foreach { _.send(CleanupOldBlocks(cleanupThreshTime)) }
     }
+  }
+
+  /**
+   * Updates a receiver on the processing speed of its stream, counted in elements
+   * processed per block interval.
+   */
+  def refreshLatestSpeeds(batchTime: Time, streamIdToElemsPerBatch: Map[Int, Long]){
+    val blockIntervalMs = ssc.conf.getTimeAsMs("spark.streaming.blockInterval", "200ms")
+    val ratio = blockIntervalMs.toFloat / ssc.graph.batchDuration.milliseconds
+
+    for {(sId, speed) <- streamIdToElemsPerBatch
+        info <- receiverInfo.get(sId)
+        eP <- Option(info.endpoint)}
+    if (speed > 0) eP.send(BatchProcessingSpeedInfo(batchTime, math.round( speed * ratio )))
   }
 
   /** Register a receiver */

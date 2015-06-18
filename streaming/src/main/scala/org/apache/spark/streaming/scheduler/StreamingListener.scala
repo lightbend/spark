@@ -21,6 +21,8 @@ import scala.collection.mutable.Queue
 
 import org.apache.spark.util.Distribution
 import org.apache.spark.annotation.DeveloperApi
+import org.apache.spark.streaming.Duration
+import org.apache.spark.streaming.Time
 
 /**
  * :: DeveloperApi ::
@@ -77,6 +79,60 @@ trait StreamingListener {
   def onBatchCompleted(batchCompleted: StreamingListenerBatchCompleted) { }
 }
 
+/**
+ * :: DeveloperApi ::
+ * A StreamingListener that estimates the number of elements that the previous
+ * batch would have processed, for each stream, if the duration of computation
+ * was one batchDuration.
+ * @param batchDuration The nominal (yardstick) duration for computation.
+ */
+@DeveloperApi
+class LatestSpeedListener(batchDuration: Duration) extends StreamingListener {
+  var latestTime : Option[Time] = None
+  var streamIdToElemsPerBatch: Option[Map[Int, Long]] = None
+  val proportionalK: Double = 1.0
+  val integralK: Double = -0.2
+
+  override def onBatchCompleted(batchCompleted: StreamingListenerBatchCompleted){
+    this.synchronized{
+      val newTime = batchCompleted.batchInfo.batchTime
+      val workDelay = batchCompleted.batchInfo.processingDelay
+      val waitDelay = batchCompleted.batchInfo.schedulingDelay
+
+      if (latestTime.isEmpty || newTime > latestTime.get && workDelay.isDefined){
+        latestTime = Some(newTime)
+        val elements = batchCompleted.batchInfo.streamIdToNumRecords
+        // Percentage of a batch interval this job computed for
+        val workRatio = workDelay.get.toDouble / batchDuration.milliseconds
+        // Ratio of wait to work time
+        val waitRatio = waitDelay.getOrElse(0L).toDouble / workDelay.get.toDouble
+
+        streamIdToElemsPerBatch = Some(elements.mapValues{ elements =>
+        // Based on this batch's size, how many elements this setup
+        // can process given one batch interval of computation
+        val elementsThisBatch = elements / workRatio
+
+        // This computes how many elements could have been processed
+        // at that speed, if the wait time had been compute time
+        // (i.e. given an amount of time equal to the scheduling delay),
+        // Because the scheduling delay increases synchronously for
+        // every job, this represents the aggregation of the error
+        // signal between elements flowing in and out - the integral
+        // component of a PID.
+        val waitElementsThisBatch = elements * waitRatio
+
+        val batchElements = proportionalK * elementsThisBatch + integralK * waitElementsThisBatch
+        math.round(batchElements)
+        })
+      }
+    }
+  }
+
+  def getSpeedForStreamId(streamId: Int): Option[Long] = {
+    streamIdToElemsPerBatch.flatMap(_.get(streamId))
+  }
+
+}
 
 /**
  * :: DeveloperApi ::
