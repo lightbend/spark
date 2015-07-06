@@ -67,6 +67,8 @@ class JobScheduler(val ssc: StreamingContext) extends Logging {
     eventLoop.start()
 
     listenerBus.start(ssc.sparkContext)
+    // Estimators receive updates from batch completion
+    ssc.graph.getInputStreams.flatMap(_.rateController).foreach(ssc.addStreamingListener(_))
     receiverTracker = new ReceiverTracker(ssc)
     inputInfoTracker = new InputInfoTracker(ssc)
     receiverTracker.start()
