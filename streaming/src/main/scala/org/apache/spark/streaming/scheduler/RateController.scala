@@ -21,6 +21,9 @@ import java.util.concurrent.atomic.AtomicLong
 
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.streaming.scheduler.rate.RateEstimator
+import org.apache.spark.util.ThreadUtils
+
+import scala.concurrent.{ExecutionContext, Future}
 
 /**
  * :: DeveloperApi ::
@@ -29,9 +32,24 @@ import org.apache.spark.streaming.scheduler.rate.RateEstimator
  * given an estimate computation from a `RateEstimator`
  */
 @DeveloperApi
-class RateController(val streamUID: Int, rateEstimator: RateEstimator) extends StreamingListener {
+class RateController(val streamUID: Int,
+                     rateEstimator: RateEstimator,
+                     publisher: Long => Unit = (l) => ())
+  extends StreamingListener {
+
+  private val rateUpdateExecutionContext = ExecutionContext.fromExecutorService(
+    ThreadUtils.newDaemonSingleThreadExecutor("stream-rate-update"))
 
   private val speedLimit : AtomicLong = new AtomicLong(-1L)
+
+  def rateUpdate(time: Long, elems: Long, workDelay: Long, waitDelay: Long): Unit =
+    Future[Unit] {
+      val newSpeed = rateEstimator.compute(time, elems, workDelay, waitDelay)
+      newSpeed foreach { s =>
+        speedLimit.set(s.toLong)
+        publisher(getLatestRate())
+      }
+    } (rateUpdateExecutionContext)
 
   def getLatestRate(): Long = speedLimit.get()
 
@@ -43,8 +61,7 @@ class RateController(val streamUID: Int, rateEstimator: RateEstimator) extends S
       workDelay <- batchCompleted.batchInfo.processingDelay
       waitDelay <- batchCompleted.batchInfo.schedulingDelay
       elems <- elements.get(streamUID)
-      newSpeed <- rateEstimator.compute(processingEnd, elems, workDelay, waitDelay)
-    } speedLimit.set(newSpeed.toLong)
+    } rateUpdate(processingEnd, elems, workDelay, waitDelay)
   }
 
 }

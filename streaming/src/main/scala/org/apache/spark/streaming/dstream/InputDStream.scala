@@ -22,6 +22,8 @@ import scala.reflect.ClassTag
 import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDDOperationScope
 import org.apache.spark.streaming.{Time, Duration, StreamingContext}
+import org.apache.spark.streaming.scheduler.rate._
+import org.apache.spark.streaming.scheduler.RateController
 import org.apache.spark.util.Utils
 
 /**
@@ -46,6 +48,18 @@ abstract class InputDStream[T: ClassTag] (@transient ssc_ : StreamingContext)
 
   /** This is an unique identifier for the input stream. */
   val id = ssc.getNewInputStreamId()
+
+  /**
+   * A StreamingListener that maintains a maximum ingestion speed for this
+   * stream. Initialized with `attachRateEstimator`.
+   */
+  private[streaming] var rateController: Option[RateController] = None
+
+  def attachRateEstimator(rateEstimator: RateEstimator): Unit = {
+    if (ssc.scheduler.isStarted == false) {
+      rateController = Some(new RateController(id, rateEstimator))
+    }
+  }
 
   /** A human-readable name of this InputDStream */
   private[streaming] def name: String = {
