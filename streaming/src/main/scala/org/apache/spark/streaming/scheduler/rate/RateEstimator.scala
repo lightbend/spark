@@ -15,13 +15,24 @@
  * limitations under the License.
  */
 
-package org.apache.spark.streaming.receiver
+package org.apache.spark.streaming.scheduler.rate
 
-import org.apache.spark.streaming.Time
+import org.apache.spark.annotation.DeveloperApi
 
-/** Messages sent to the Receiver. */
-private[streaming] sealed trait ReceiverMessage extends Serializable
-private[streaming] object StopReceiver extends ReceiverMessage
-private[streaming] case class CleanupOldBlocks(threshTime: Time) extends ReceiverMessage
-private[streaming] case class RateLimitUpdate(elementsPerSecond: Long)
-                   extends ReceiverMessage
+/**
+ * :: DeveloperApi ::
+ * A component that estimates the rate at wich an InputDStream should ingest
+ * elements, based on updates at every batch completion.
+ */
+@DeveloperApi
+trait RateEstimator {
+
+  /**
+   * Computes the number of elements the stream attached to this `RateEstimator`
+   * should ingest per second, given an update on the size and completion
+   * times of the latest batch.
+   */
+  def compute(time: Long, elements: Long,
+              processingDelay: Long, schedulingDelay: Long): Option[Double]
+
+}

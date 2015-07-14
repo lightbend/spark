@@ -17,6 +17,8 @@
 
 package org.apache.spark.streaming.receiver
 
+import java.util.concurrent.atomic.AtomicInteger
+
 import com.google.common.util.concurrent.{RateLimiter => GuavaRateLimiter}
 
 import org.apache.spark.{Logging, SparkConf}
@@ -34,12 +36,26 @@ import org.apache.spark.{Logging, SparkConf}
   */
 private[receiver] abstract class RateLimiter(conf: SparkConf) extends Logging {
 
+  // treated as an upper limit
   private val desiredRate = conf.getInt("spark.streaming.receiver.maxRate", 0)
-  private lazy val rateLimiter = GuavaRateLimiter.create(desiredRate)
+  private var currentRate = new AtomicInteger(desiredRate)
+  private lazy val rateLimiter = GuavaRateLimiter.create(currentRate.get())
 
   def waitToPush() {
-    if (desiredRate > 0) {
+    if (currentRate.get() > 0) {
       rateLimiter.acquire()
     }
   }
+
+  private[receiver] def updateRate(newRate: Int): Unit =
+    if (newRate > 0) {
+      try {
+        if (desiredRate > 0) {
+          currentRate.set(newRate min desiredRate)
+        }
+        else currentRate.set(newRate)
+      } finally {
+        rateLimiter.setRate(currentRate.get())
+      }
+    }
 }
