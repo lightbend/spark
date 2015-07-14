@@ -23,7 +23,7 @@ import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDDOperationScope
 import org.apache.spark.streaming.{Time, Duration, StreamingContext}
 import org.apache.spark.streaming.scheduler.RateController
-import org.apache.spark.streaming.scheduler.rate.NoopRateEstimator
+import org.apache.spark.streaming.scheduler.rate.{NoopRateEstimator, PIDRateEstimator}
 import org.apache.spark.util.Utils
 
 /**
@@ -56,6 +56,10 @@ abstract class InputDStream[T: ClassTag] (@transient ssc_ : StreamingContext)
   protected [streaming] val rateEstimator = ssc.conf
                                                .getOption("spark.streaming.RateEstimator")
                                                .getOrElse("noop") match {
+                                                 case "pid" =>
+                                                   new PIDRateEstimator(
+                                                     ssc.graph.batchDuration.milliseconds
+                                                   )
                                                  case _ => new NoopRateEstimator()
                                                }
 

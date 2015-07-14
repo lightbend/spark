@@ -21,15 +21,16 @@ import scala.collection.mutable.{ArrayBuffer, SynchronizedBuffer}
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
 
+import org.apache.spark.Logging
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.dstream.DStream
 import org.apache.spark.streaming.receiver.Receiver
 import org.apache.spark.streaming.scheduler._
+import org.apache.spark.streaming.scheduler.rate._
 
 import org.scalatest.Matchers
 import org.scalatest.concurrent.Eventually._
 import org.scalatest.time.SpanSugar._
-import org.apache.spark.Logging
 
 class StreamingListenerSuite extends TestSuiteBase with Matchers {
 
@@ -129,6 +130,37 @@ class StreamingListenerSuite extends TestSuiteBase with Matchers {
     } finally {
       ssc.stop()
     }
+  }
+
+  // This test is long to run an may be dependent on your machine's
+  // characteristics (high variance in estimating processing speed on a
+  // small batch)
+  ignore("latest speed reporting") {
+    val operation = (d: DStream[Int]) => d.map(Thread.sleep(_))
+    val midInput = Seq.fill(10)(Seq.fill(100)(1))
+    val midSsc = setupStreams(midInput, operation)
+    val midLatestRate = new RateController(0,
+                         new PIDRateEstimator(batchDuration.milliseconds, -1, 0, 0)){
+                           def publish(r: Long): Unit = ()
+                         }
+    midSsc.addStreamingListener(midLatestRate)
+    runStreams(midSsc, midInput.size, midInput.size)
+
+    val midSp = midLatestRate.getLatestRate()
+
+    // between two batch sizes that are both below the system's limits,
+    // the estimate of elements processed per batch should be comparable
+    val bigInput = Seq.fill(10)(Seq.fill(500)(1))
+    val bigSsc = setupStreams(bigInput, operation)
+    val bigLatestRate = new RateController(0,
+                         new PIDRateEstimator(batchDuration.milliseconds, -1, 0, 0)){
+                           def publish(r: Long): Unit = ()
+                         }
+    bigSsc.addStreamingListener(bigLatestRate)
+    runStreams(bigSsc, bigInput.size, bigInput.size)
+
+    val bigSp = bigLatestRate.getLatestRate()
+    bigSp should (be >= (midSp / 2) and be <= (midSp * 2))
   }
 
   /** Check if a sequence of numbers is in increasing order */
