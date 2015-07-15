@@ -23,7 +23,7 @@ import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDDOperationScope
 import org.apache.spark.streaming.{Time, Duration, StreamingContext}
 import org.apache.spark.streaming.scheduler.RateController
-import org.apache.spark.streaming.scheduler.rate.{NoopRateEstimator, PIDRateEstimator}
+import org.apache.spark.streaming.scheduler.rate.{RateEstimator, NoopRateEstimator, PIDRateEstimator}
 import org.apache.spark.util.Utils
 
 /**
@@ -49,19 +49,19 @@ abstract class InputDStream[T: ClassTag] (@transient ssc_ : StreamingContext)
   /** This is an unique identifier for the input stream. */
   val id = ssc.getNewInputStreamId()
 
+
+  private def resolveRateEstimator(configString: String): RateEstimator = configString match {
+    case "pid" => new PIDRateEstimator(ssc.graph.batchDuration.milliseconds)
+    case _ => new NoopRateEstimator()
+  }
   /**
    * A rate estimator configured by the user to compute a dynamic ingestion bound for this stream.
    * @see `RateEstimator`
    */
-  protected [streaming] val rateEstimator = ssc.conf
-                                               .getOption("spark.streaming.RateEstimator")
-                                               .getOrElse("noop") match {
-                                                 case "pid" =>
-                                                   new PIDRateEstimator(
-                                                     ssc.graph.batchDuration.milliseconds
-                                                   )
-                                                 case _ => new NoopRateEstimator()
-                                               }
+  protected [streaming] val rateEstimator =
+    resolveRateEstimator(ssc.conf
+                         .getOption("spark.streaming.RateEstimator")
+                         .getOrElse("noop"))
 
   // Keep track of the freshest rate for this stream using the rateEstimator
   protected[streaming] val rateController: RateController = new RateController(id, rateEstimator) {
