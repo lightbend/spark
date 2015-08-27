@@ -23,7 +23,9 @@ class Interval(val beginTime: Time, val endTime: Time) {
 
   def duration(): Duration = endTime - beginTime
 
-  def + (time: Duration): Interval = {
+  def + (time: Duration): Interval = plus(time)
+
+  def plus(time: Duration): Interval = {
     new Interval(beginTime + time, endTime + time)
   }
 
