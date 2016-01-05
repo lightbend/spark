@@ -31,7 +31,7 @@ private[mesos] class MesosClusterDispatcherArguments(args: Array[String], conf: 
   var masterUrl: String = _
   var zookeeperUrl: Option[String] = None
   var propertiesFile: String = _
-  var driverFailOver = true // keep the scheduler driver registered with Mesos after dispatcher is stopped
+  var driverFailOver = true // keep the driver registered with Mesos after dispatcher is stopped
 
   parse(args.toList)
 
