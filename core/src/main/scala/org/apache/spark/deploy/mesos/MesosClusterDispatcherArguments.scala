@@ -20,6 +20,8 @@ package org.apache.spark.deploy.mesos
 import org.apache.spark.SparkConf
 import org.apache.spark.util.{IntParam, Utils}
 
+import scala.util.Try
+
 
 private[mesos] class MesosClusterDispatcherArguments(args: Array[String], conf: SparkConf) {
   var host = Utils.localHostName()
@@ -29,6 +31,7 @@ private[mesos] class MesosClusterDispatcherArguments(args: Array[String], conf: 
   var masterUrl: String = _
   var zookeeperUrl: Option[String] = None
   var propertiesFile: String = _
+  var driverFailOver = true // keep the driver registered with Mesos after dispatcher is stopped
 
   parse(args.toList)
 
@@ -73,6 +76,11 @@ private[mesos] class MesosClusterDispatcherArguments(args: Array[String], conf: 
     case ("--help") :: tail =>
       printUsageAndExit(0)
 
+    case ("--disable-failover") :: tail =>
+      driverFailOver = false
+      parse(tail)
+
+
     case Nil => {
       if (masterUrl == null) {
         // scalastyle:off println
@@ -97,6 +105,7 @@ private[mesos] class MesosClusterDispatcherArguments(args: Array[String], conf: 
         "  --webui-port WEBUI_PORT WebUI Port to listen on (default: 8081)\n" +
         "  --name NAME             Framework name to show in Mesos UI\n" +
         "  -m --master MASTER      URI for connecting to Mesos master\n" +
+        "  --disable-failover      Will kill the scheduler driver when dispatcher is stopped\n" +
         "  -z --zk ZOOKEEPER       Comma delimited URLs for connecting to \n" +
         "                          Zookeeper for persistence\n" +
         "  --properties-file FILE  Path to a custom Spark properties file.\n" +

@@ -21,7 +21,7 @@ import java.io.File
 import java.util.{Collections, Date, List => JList}
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable
+import scala.collection.{Set, mutable}
 import scala.collection.mutable.ArrayBuffer
 
 import org.apache.mesos.{Scheduler, SchedulerDriver}
@@ -111,10 +111,12 @@ private[spark] class MesosDriverState(
  * sandbox which is accessible by visiting the Mesos UI.
  * This scheduler supports recovery by persisting all its state and performs task reconciliation
  * on recover, which gets all the latest state for all the drivers from Mesos master.
+ *
  */
 private[spark] class MesosClusterScheduler(
     engineFactory: MesosClusterPersistenceEngineFactory,
-    conf: SparkConf)
+    conf: SparkConf,
+    driverFailOver: Boolean = true)
   extends Scheduler with MesosSchedulerUtils {
   var frameworkUrl: String = _
   private val metricsSystem =
@@ -318,7 +320,7 @@ private[spark] class MesosClusterScheduler(
     ready = false
     metricsSystem.report()
     metricsSystem.stop()
-    mesosDriver.stop(true)
+    mesosDriver.stop(driverFailOver)
   }
 
   override def registered(
@@ -671,5 +673,6 @@ private[spark] class MesosClusterScheduler(
 
   def getQueuedDriversSize: Int = queuedDrivers.size
   def getLaunchedDriversSize: Int = launchedDrivers.size
+  def getLaunchedDriversSubmissionIds: Set[String] = launchedDrivers.keySet
   def getPendingRetryDriversSize: Int = pendingRetryDrivers.size
 }
