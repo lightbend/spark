@@ -375,6 +375,7 @@ private[spark] class MesosSchedulerBackend(
     inClassLoader() {
       logError("Mesos error: " + message)
       scheduler.error(message)
+      markErr()
     }
   }
 

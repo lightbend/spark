@@ -28,7 +28,7 @@ import com.google.common.base.Splitter
 import org.apache.mesos.{MesosSchedulerDriver, SchedulerDriver, Scheduler, Protos}
 import org.apache.mesos.Protos._
 import org.apache.mesos.protobuf.{ByteString, GeneratedMessage}
-import org.apache.spark.{SparkException, SparkConf, Logging, SparkContext}
+import org.apache.spark._
 import org.apache.spark.util.Utils
 
 
@@ -107,25 +107,25 @@ private[mesos] trait MesosSchedulerUtils extends Logging {
         return
       }
 
-      new Thread(Utils.getFormattedClassName(this) + "-mesos-driver") {
+      val t = new Thread(Utils.getFormattedClassName(this) + "-mesos-driver") {
         setDaemon(true)
 
         override def run() {
           mesosDriver = newDriver
-          try {
-            val ret = mesosDriver.run()
-            logInfo("driver.run() returned with code " + ret)
-            if (ret != null && ret.equals(Status.DRIVER_ABORTED)) {
-              System.exit(1)
-            }
-          } catch {
-            case e: Exception => {
-              logError("driver.run() failed", e)
-              System.exit(1)
-            }
+          val ret = mesosDriver.run()
+          logInfo("driver.run() returned with code " + ret)
+          if (ret != null && ret.equals(Status.DRIVER_ABORTED)) {
+            throw new SparkException("Error starting driver, DRIVER_ABORTED")
           }
         }
-      }.start()
+      }
+
+      t.start()
+      t.setUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler {
+        override def uncaughtException(t: Thread, e: Throwable): Unit = {
+          logError("Error starting driver", e)
+        }
+      })
 
       registerLatch.await()
     }
@@ -141,6 +141,11 @@ private[mesos] trait MesosSchedulerUtils extends Logging {
   }
 
   protected def markRegistered(): Unit = {
+    registerLatch.countDown()
+  }
+
+  protected def markErr(): Unit = {
+    println(">>>>>>>>> markErr is called")
     registerLatch.countDown()
   }
 
