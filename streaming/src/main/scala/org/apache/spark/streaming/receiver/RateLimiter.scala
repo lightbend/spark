@@ -32,20 +32,19 @@ import org.apache.spark.{Logging, SparkConf}
   *
   * @param conf spark configuration
   */
-private[receiver] abstract class RateLimiter(conf: SparkConf) extends Logging {
+private[streaming] class SupervisorRateLimiter(override val conf: SparkConf) extends BlockingRateLimiter with Logging {
 
   // treated as an upper limit
-  private val maxRateLimit = conf.getLong("spark.streaming.receiver.maxRate", Long.MaxValue)
   private lazy val rateLimiter = GuavaRateLimiter.create(getInitialRateLimit().toDouble)
 
-  def waitToPush() {
+  override def waitToPush() {
     rateLimiter.acquire()
   }
 
   /**
    * Return the current rate limit. If no limit has been set so far, it returns {{{Long.MaxValue}}}.
    */
-  def getCurrentLimit: Long = rateLimiter.getRate.toLong
+  override def getCurrentLimit: Long = rateLimiter.getRate.toLong
 
   /**
    * Set the rate limit to `newRate`. The new rate will not exceed the maximum rate configured by
@@ -53,7 +52,7 @@ private[receiver] abstract class RateLimiter(conf: SparkConf) extends Logging {
    *
    * @param newRate A new rate in events per second. It has no effect if it's 0 or negative.
    */
-  private[receiver] def updateRate(newRate: Long): Unit =
+  override private[receiver] def updateRate(newRate: Long): Unit =
     if (newRate > 0) {
       if (maxRateLimit > 0) {
         rateLimiter.setRate(newRate.min(maxRateLimit))
@@ -61,11 +60,37 @@ private[receiver] abstract class RateLimiter(conf: SparkConf) extends Logging {
         rateLimiter.setRate(newRate)
       }
     }
+}
+
+object NoOpBlockingRateLimiter extends BlockingRateLimiter {
+
+  protected def conf: SparkConf = null
+
+  private[receiver] def updateRate(newRate: Long): Unit = {}
+
+  private[streaming] def getCurrentLimit: Long = Long.MaxValue
+
+  def waitToPush(): Unit = {}
+}
+
+trait BlockingRateLimiter extends RateLimiter {
+  def waitToPush(): Unit
+}
+
+trait RateLimiter {
+
+  protected def conf: SparkConf
+
+  private[receiver] def updateRate(newRate: Long): Unit
+
+  private[streaming] def getCurrentLimit: Long
+
+  protected val maxRateLimit = conf.getLong("spark.streaming.receiver.maxRate", Long.MaxValue)
 
   /**
    * Get the initial rateLimit to initial rateLimiter
    */
-  private def getInitialRateLimit(): Long = {
+  protected def getInitialRateLimit(): Long = {
     math.min(conf.getLong("spark.streaming.backpressure.initialRate", maxRateLimit), maxRateLimit)
   }
 }

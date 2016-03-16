@@ -77,8 +77,9 @@ private[streaming] class BlockGenerator(
     listener: BlockGeneratorListener,
     receiverId: Int,
     conf: SparkConf,
+    val rateLimiter: BlockingRateLimiter,
     clock: Clock = new SystemClock()
-  ) extends RateLimiter(conf) with Logging {
+  ) extends Logging {
 
   private case class Block(id: StreamBlockId, buffer: ArrayBuffer[Any])
 
@@ -159,7 +160,7 @@ private[streaming] class BlockGenerator(
    */
   def addData(data: Any): Unit = {
     if (state == Active) {
-      waitToPush()
+      rateLimiter.waitToPush()
       synchronized {
         if (state == Active) {
           currentBuffer += data
@@ -180,7 +181,7 @@ private[streaming] class BlockGenerator(
    */
   def addDataWithCallback(data: Any, metadata: Any): Unit = {
     if (state == Active) {
-      waitToPush()
+      rateLimiter.waitToPush()
       synchronized {
         if (state == Active) {
           currentBuffer += data
@@ -206,7 +207,7 @@ private[streaming] class BlockGenerator(
       // Unroll iterator into a temp buffer, and wait for pushing in the process
       val tempBuffer = new ArrayBuffer[Any]
       dataIterator.foreach { data =>
-        waitToPush()
+        rateLimiter.waitToPush()
         tempBuffer += data
       }
       synchronized {

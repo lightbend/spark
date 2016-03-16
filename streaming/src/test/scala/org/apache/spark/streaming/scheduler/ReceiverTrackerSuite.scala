@@ -153,7 +153,7 @@ private[streaming] class RateTestReceiver(receiverId: Int, host: Option[String] 
   }
 
   def getCustomBlockGeneratorRateLimit(): Long = {
-    customBlockGenerator.getCurrentLimit
+    customBlockGenerator.rateLimiter.getCurrentLimit
   }
 }
 

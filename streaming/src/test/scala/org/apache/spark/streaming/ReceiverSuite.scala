@@ -20,20 +20,18 @@ package org.apache.spark.streaming
 import java.io.File
 import java.nio.ByteBuffer
 import java.util.concurrent.Semaphore
-
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
-
 import org.scalatest.concurrent.Eventually._
 import org.scalatest.concurrent.Timeouts
 import org.scalatest.time.SpanSugar._
-
 import org.apache.spark.SparkConf
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.storage.StreamBlockId
 import org.apache.spark.streaming.receiver._
 import org.apache.spark.streaming.receiver.WriteAheadLogBasedBlockHandler._
 import org.apache.spark.util.Utils
+import org.apache.spark.streaming.receiver.SupervisorRateLimiter
 
 /** Testsuite for testing the network receiver behavior */
 class ReceiverSuite extends TestSuiteBase with Timeouts with Serializable {
@@ -135,7 +133,7 @@ class ReceiverSuite extends TestSuiteBase with Timeouts with Serializable {
     val maxRate = 1001
     val conf = new SparkConf().set("spark.streaming.blockInterval", s"${blockIntervalMs}ms").
       set("spark.streaming.receiver.maxRate", maxRate.toString)
-    val blockGenerator = new BlockGenerator(blockGeneratorListener, 1, conf)
+    val blockGenerator = new BlockGenerator(blockGeneratorListener, 1, conf, new SupervisorRateLimiter(conf))
     val expectedBlocks = 20
     val waitTime = expectedBlocks * blockIntervalMs
     val expectedMessages = maxRate * waitTime / 1000

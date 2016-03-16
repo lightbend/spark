@@ -20,13 +20,10 @@ package org.apache.spark.streaming.receiver
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.ConcurrentLinkedQueue
-
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
-
 import com.google.common.base.Throwables
 import org.apache.hadoop.conf.Configuration
-
 import org.apache.spark.{Logging, SparkEnv, SparkException}
 import org.apache.spark.rpc.{RpcEnv, ThreadSafeRpcEndpoint}
 import org.apache.spark.storage.StreamBlockId
@@ -34,6 +31,7 @@ import org.apache.spark.streaming.Time
 import org.apache.spark.streaming.scheduler._
 import org.apache.spark.streaming.util.WriteAheadLogUtils
 import org.apache.spark.util.RpcUtils
+import org.apache.spark.SparkConf
 
 /**
  * Concrete implementation of [[org.apache.spark.streaming.receiver.ReceiverSupervisor]]
@@ -84,9 +82,7 @@ private[streaming] class ReceiverSupervisorImpl(
           cleanupOldBlocks(threshTime)
         case UpdateRateLimit(eps) =>
           logInfo(s"Received a new rate limit: $eps.")
-          registeredBlockGenerators.asScala.foreach { bg =>
-            bg.updateRate(eps)
-          }
+          rateLimiter.updateRate(eps)
       }
     })
 
@@ -94,6 +90,25 @@ private[streaming] class ReceiverSupervisorImpl(
   private val newBlockId = new AtomicLong(System.currentTimeMillis())
 
   private val registeredBlockGenerators = new ConcurrentLinkedQueue[BlockGenerator]()
+
+  private val useReceiverRateLimiter: Boolean = receiver.isInstanceOf[RateLimiter]
+
+  private val rateLimiter: RateLimiter = if (useReceiverRateLimiter) {
+    receiver.asInstanceOf[RateLimiter]
+  } else {
+    new WrapperRateLimiter(env.conf)
+  }
+
+  private class WrapperRateLimiter(override val conf: SparkConf) extends RateLimiter {
+    private[receiver] def updateRate(newRate: Long): Unit = {
+      registeredBlockGenerators.asScala.foreach { bg =>
+        bg.rateLimiter.updateRate(newRate)
+      }
+    }
+
+    private[streaming] def getCurrentLimit: Long =
+      defaultBlockGenerator.rateLimiter.getCurrentLimit
+  }
 
   /** Divides received data records into data blocks for pushing in BlockManager. */
   private val defaultBlockGeneratorListener = new BlockGeneratorListener {
@@ -112,7 +127,7 @@ private[streaming] class ReceiverSupervisorImpl(
   private val defaultBlockGenerator = createBlockGenerator(defaultBlockGeneratorListener)
 
   /** Get the current rate limit of the default block generator */
-  override private[streaming] def getCurrentRateLimit: Long = defaultBlockGenerator.getCurrentLimit
+  override private[streaming] def getCurrentRateLimit: Long = defaultBlockGenerator.rateLimiter.getCurrentLimit
 
   /** Push a single record of received data into block generator. */
   def pushSingle(data: Any) {
@@ -197,7 +212,13 @@ private[streaming] class ReceiverSupervisorImpl(
     val stoppedGenerators = registeredBlockGenerators.asScala.filter{ _.isStopped() }
     stoppedGenerators.foreach(registeredBlockGenerators.remove(_))
 
-    val newBlockGenerator = new BlockGenerator(blockGeneratorListener, streamId, env.conf)
+    val rateLimiter = if (useReceiverRateLimiter) {
+      NoOpBlockingRateLimiter
+    } else {
+      new SupervisorRateLimiter(env.conf)
+    }
+
+    val newBlockGenerator = new BlockGenerator(blockGeneratorListener, streamId, env.conf, rateLimiter)
     registeredBlockGenerators.add(newBlockGenerator)
     newBlockGenerator
   }
