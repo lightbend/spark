@@ -112,12 +112,14 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
+        <version>2.7</version>
         <configuration>
           <skipTests>true</skipTests>
         </configuration>
       </plugin>
-
       <plugin>
+
+
         <!-- Triggers scalatest plugin in the integration-test phase instead of
              the test phase. -->
         <groupId>org.scalatest</groupId>
@@ -127,11 +129,12 @@
           <reportsDirectory>${project.build.directory}/surefire-reports</reportsDirectory>
           <junitxml>.</junitxml>
           <filereports>SparkTestSuite.txt</filereports>
-          <argLine>-ea -Xmx3g -XX:ReservedCodeCacheSize=512m ${extraScalaTestArgs}</argLine>
+          <argLine>-ea -Xmx3g -XX:ReservedCodeCacheSize=512m ${extraScalaTestArgs} </argLine>
           <stderr/>
           <systemProperties>
             <log4j.configuration>file:src/test/resources/log4j.properties</log4j.configuration>
             <java.awt.headless>true</java.awt.headless>
+            <spark.kubernetes.test.extraJars>${spark.kubernetes.test.extraJars}</spark.kubernetes.test.extraJars>
             <spark.kubernetes.test.imageTagFile>${spark.kubernetes.test.imageTagFile}</spark.kubernetes.test.imageTagFile>
             <spark.kubernetes.test.unpackSparkDir>${spark.kubernetes.test.unpackSparkDir}</spark.kubernetes.test.unpackSparkDir>
             <spark.kubernetes.test.imageRepo>${spark.kubernetes.test.imageRepo}</spark.kubernetes.test.imageRepo>

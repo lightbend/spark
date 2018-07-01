@@ -27,6 +27,14 @@ set +e
 uidentry=$(getent passwd $myuid)
 set -e
 
+if [ -n "$HADOOP_CONFIG_URL" ]; then
+   echo "Setting up hadoop config files...."
+   mkdir -p /etc/hadoop/conf
+   wget $HADOOP_CONFIG_URL/core-site.xml -P /etc/hadoop/conf
+   wget $HADOOP_CONFIG_URL/hdfs-site.xml -P /etc/hadoop/conf
+   export HADOOP_CONF_DIR=/etc/hadoop/conf
+fi
+
 # If there is no passwd entry for the container UID, attempt to create one
 if [ -z "$uidentry" ] ; then
     if [ -w /etc/passwd ] ; then
