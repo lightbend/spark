@@ -22,8 +22,9 @@ import java.util.UUID
 import java.util.regex.Pattern
 
 import com.google.common.io.PatternFilenameFilter
-import io.fabric8.kubernetes.api.model.Pod
-import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, Tag}
+import io.fabric8.kubernetes.api.model.{Container, Pod}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
+import org.scalatest.Tag
 import org.scalatest.concurrent.{Eventually, PatienceConfiguration}
 import org.scalatest.time.{Minutes, Seconds, Span}
 import scala.collection.JavaConverters._
@@ -32,6 +33,8 @@ import org.apache.spark.SparkFunSuite
 import org.apache.spark.deploy.k8s.integrationtest.backend.{IntegrationTestBackend, IntegrationTestBackendFactory}
 import org.apache.spark.deploy.k8s.integrationtest.config._
 import org.apache.spark.launcher.SparkLauncher
+
+object NoDCOS extends Tag("noDcos")
 
 object NoDCOS extends Tag("noDcos")
 
@@ -114,13 +117,7 @@ private[spark] class KubernetesSuite extends SparkFunSuite
     runSparkPiAndVerifyCompletion()
   }
 
-  test("Use SparkLauncher.NO_RESOURCE", k8sTestTag) {
-    sparkAppConf.setJars(Seq(containerLocalSparkDistroExamplesJar))
-    runSparkPiAndVerifyCompletion(
-      appResource = SparkLauncher.NO_RESOURCE)
-  }
-
-  test("Run SparkPi with a master URL without a scheme.", k8sTestTag) {
+  test("Run SparkPi with a master URL without a scheme.", NoDCOS) {
     val url = kubernetesTestComponents.kubernetesClient.getMasterUrl
     val k8sMasterUrl = if (url.getPort < 0) {
       s"k8s://${url.getHost}"
