@@ -47,8 +47,9 @@ object KafkaSimpleProducer {
           println(s"Sending record $i ...")
           producer.send(record)
         }
-        println("Success!")
+        producer.flush()
         producer.close()
+        println("Success!")
       case None =>
     }
   }
