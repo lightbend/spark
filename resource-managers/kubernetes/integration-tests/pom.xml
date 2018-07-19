@@ -63,6 +63,11 @@
       <artifactId>kubernetes-client</artifactId>
       <version>${kubernetes-client.version}</version>
     </dependency>
+    <dependency>
+      <groupId>org.apache.spark</groupId>
+      <artifactId>spark-tags_${scala.binary.version}</artifactId>
+      <type>test-jar</type>
+    </dependency>
   </dependencies>
 
   <build>
@@ -102,6 +107,14 @@
             </configuration>
           </execution>
         </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <skipTests>true</skipTests>
+        </configuration>
       </plugin>
 
       <plugin>
