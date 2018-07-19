@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-FROM openjdk:8-alpine
+FROM lightbend/custom-ubuntu-openjdk8:16.04
 
 ARG spark_jars=jars
 ARG img_path=kubernetes/dockerfiles
@@ -28,8 +28,9 @@ ARG img_path=kubernetes/dockerfiles
 # docker build -t spark:latest -f kubernetes/dockerfiles/spark/Dockerfile .
 
 RUN set -ex && \
-    apk upgrade --no-cache && \
-    apk add --no-cache bash tini libc6-compat && \
+    apt-get -y update && \
+    apt-get -y upgrade && \
+    apt-get -y install bash libc6 && \
     mkdir -p /opt/spark && \
     mkdir -p /opt/spark/work-dir \
     touch /opt/spark/RELEASE && \
@@ -43,6 +44,11 @@ COPY sbin /opt/spark/sbin
 COPY ${img_path}/spark/entrypoint.sh /opt/
 COPY examples /opt/spark/examples
 COPY data /opt/spark/data
+
+# Add Tini
+ENV TINI_VERSION v0.18.0
+ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /sbin/tini
+RUN chmod +x /sbin/tini
 
 ENV SPARK_HOME /opt/spark
 
