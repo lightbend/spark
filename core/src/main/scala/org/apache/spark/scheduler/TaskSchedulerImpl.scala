@@ -697,12 +697,9 @@ private[spark] class TaskSchedulerImpl(
    * do not also submit those same tasks.  That also means that a task completion from an earlier
    * attempt can lead to the entire stage getting marked as successful.
    */
-  private[scheduler] def markPartitionCompletedInAllTaskSets(
-      stageId: Int,
-      partitionId: Int,
-      taskInfo: TaskInfo) = {
+  private[scheduler] def markPartitionCompletedInAllTaskSets(stageId: Int, partitionId: Int) = {
     taskSetsByStageIdAndAttempt.getOrElse(stageId, Map()).values.foreach { tsm =>
-      tsm.markPartitionCompleted(partitionId, taskInfo)
+      tsm.markPartitionCompleted(partitionId)
     }
   }
 

@@ -16,8 +16,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-set -xo errexit
-TEST_ROOT_DIR=$(git rev-parse --show-toplevel)
+TEST_ROOT_DIR=$(git rev-parse --show-toplevel)/resource-managers/kubernetes/integration-tests
+
+cd "${TEST_ROOT_DIR}"
 
 DEPLOY_MODE="minikube"
 IMAGE_REPO="docker.io/kubespark"
@@ -80,12 +81,13 @@ while (( "$#" )); do
   shift
 done
 
+cd $TEST_ROOT_DIR
+
 properties=(
   -Dspark.kubernetes.test.sparkTgz=$SPARK_TGZ \
   -Dspark.kubernetes.test.imageTag=$IMAGE_TAG \
   -Dspark.kubernetes.test.imageRepo=$IMAGE_REPO \
-  -Dspark.kubernetes.test.deployMode=$DEPLOY_MODE \
-  -Dtest.include.tags=$INCLUDE_TAGS
+  -Dspark.kubernetes.test.deployMode=$DEPLOY_MODE
 )
 
 if [ -n $NAMESPACE ];

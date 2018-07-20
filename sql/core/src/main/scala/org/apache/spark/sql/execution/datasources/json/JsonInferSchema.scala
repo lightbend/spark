@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.spark.sql.catalyst.json
+package org.apache.spark.sql.execution.datasources.json
 
 import java.util.Comparator
 
@@ -25,6 +25,7 @@ import org.apache.spark.SparkException
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.analysis.TypeCoercion
 import org.apache.spark.sql.catalyst.json.JacksonUtils.nextUntil
+import org.apache.spark.sql.catalyst.json.JSONOptions
 import org.apache.spark.sql.catalyst.util.{DropMalformedMode, FailFastMode, ParseMode, PermissiveMode}
 import org.apache.spark.sql.types._
 import org.apache.spark.util.Utils
@@ -102,7 +103,7 @@ private[sql] object JsonInferSchema {
   /**
    * Infer the type of a json document from the parser's token stream
    */
-  def inferField(parser: JsonParser, configOptions: JSONOptions): DataType = {
+  private def inferField(parser: JsonParser, configOptions: JSONOptions): DataType = {
     import com.fasterxml.jackson.core.JsonToken._
     parser.getCurrentToken match {
       case null | VALUE_NULL => NullType

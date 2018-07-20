@@ -223,6 +223,6 @@ class OrcSerializer(dataSchema: StructType) {
    * Return a Orc value object for the given Spark schema.
    */
   private def createOrcValue(dataType: DataType) = {
-    OrcStruct.createValue(TypeDescription.fromString(OrcFileFormat.getQuotedSchemaString(dataType)))
+    OrcStruct.createValue(TypeDescription.fromString(dataType.catalogString))
   }
 }

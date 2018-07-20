@@ -43,7 +43,6 @@ class MountSecretsFeatureStepSuite extends SparkFunSuite {
       secretNamesToMountPaths,
       Map.empty,
       Map.empty,
-      Nil,
       Seq.empty[String])
 
     val step = new MountSecretsFeatureStep(kubernetesConf)

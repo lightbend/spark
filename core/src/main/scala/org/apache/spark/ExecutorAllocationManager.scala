@@ -488,15 +488,9 @@ private[spark] class ExecutorAllocationManager(
     newExecutorTotal = numExistingExecutors
     if (testing || executorsRemoved.nonEmpty) {
       executorsRemoved.foreach { removedExecutorId =>
-        // If it is a cached block, it uses cachedExecutorIdleTimeoutS for timeout
-        val idleTimeout = if (blockManagerMaster.hasCachedBlocks(removedExecutorId)) {
-          cachedExecutorIdleTimeoutS
-        } else {
-          executorIdleTimeoutS
-        }
         newExecutorTotal -= 1
         logInfo(s"Removing executor $removedExecutorId because it has been idle for " +
-          s"$idleTimeout seconds (new desired total will be $newExecutorTotal)")
+          s"$executorIdleTimeoutS seconds (new desired total will be $newExecutorTotal)")
         executorsPendingToRemove.add(removedExecutorId)
       }
       executorsRemoved

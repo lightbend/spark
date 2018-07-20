@@ -354,12 +354,32 @@ class DataFrame(object):
         else:
             print(self._jdf.showString(n, int(truncate), vertical))
 
+    @property
+    def _eager_eval(self):
+        """Returns true if the eager evaluation enabled.
+        """
+        return self.sql_ctx.getConf(
+            "spark.sql.repl.eagerEval.enabled", "false").lower() == "true"
+
+    @property
+    def _max_num_rows(self):
+        """Returns the max row number for eager evaluation.
+        """
+        return int(self.sql_ctx.getConf(
+            "spark.sql.repl.eagerEval.maxNumRows", "20"))
+
+    @property
+    def _truncate(self):
+        """Returns the truncate length for eager evaluation.
+        """
+        return int(self.sql_ctx.getConf(
+            "spark.sql.repl.eagerEval.truncate", "20"))
+
     def __repr__(self):
-        if not self._support_repr_html and self.sql_ctx._conf.isReplEagerEvalEnabled():
+        if not self._support_repr_html and self._eager_eval:
             vertical = False
             return self._jdf.showString(
-                self.sql_ctx._conf.replEagerEvalMaxNumRows(),
-                self.sql_ctx._conf.replEagerEvalTruncate(), vertical)
+                self._max_num_rows, self._truncate, vertical)
         else:
             return "DataFrame[%s]" % (", ".join("%s: %s" % c for c in self.dtypes))
 
@@ -371,10 +391,10 @@ class DataFrame(object):
         import cgi
         if not self._support_repr_html:
             self._support_repr_html = True
-        if self.sql_ctx._conf.isReplEagerEvalEnabled():
-            max_num_rows = max(self.sql_ctx._conf.replEagerEvalMaxNumRows(), 0)
+        if self._eager_eval:
+            max_num_rows = max(self._max_num_rows, 0)
             sock_info = self._jdf.getRowsToPython(
-                max_num_rows, self.sql_ctx._conf.replEagerEvalTruncate())
+                max_num_rows, self._truncate)
             rows = list(_load_from_socket(sock_info, BatchedSerializer(PickleSerializer())))
             head = rows[0]
             row_data = rows[1:]
@@ -2029,12 +2049,13 @@ class DataFrame(object):
 
         import pandas as pd
 
-        if self.sql_ctx._conf.pandasRespectSessionTimeZone():
-            timezone = self.sql_ctx._conf.sessionLocalTimeZone()
+        if self.sql_ctx.getConf("spark.sql.execution.pandas.respectSessionTimeZone").lower() \
+           == "true":
+            timezone = self.sql_ctx.getConf("spark.sql.session.timeZone")
         else:
             timezone = None
 
-        if self.sql_ctx._conf.arrowEnabled():
+        if self.sql_ctx.getConf("spark.sql.execution.arrow.enabled", "false").lower() == "true":
             use_arrow = True
             try:
                 from pyspark.sql.types import to_arrow_schema
@@ -2044,7 +2065,8 @@ class DataFrame(object):
                 to_arrow_schema(self.schema)
             except Exception as e:
 
-                if self.sql_ctx._conf.arrowFallbackEnabled():
+                if self.sql_ctx.getConf("spark.sql.execution.arrow.fallback.enabled", "true") \
+                        .lower() == "true":
                     msg = (
                         "toPandas attempted Arrow optimization because "
                         "'spark.sql.execution.arrow.enabled' is set to true; however, "

@@ -45,7 +45,6 @@ class EnvSecretsFeatureStepSuite extends SparkFunSuite{
       Map.empty,
       envVarsToKeys,
       Map.empty,
-      Nil,
       Seq.empty[String])
 
     val step = new EnvSecretsFeatureStep(kubernetesConf)

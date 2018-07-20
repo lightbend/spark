@@ -700,7 +700,7 @@ case class GroupingSets(
 case class Pivot(
     groupByExprsOpt: Option[Seq[NamedExpression]],
     pivotColumn: Expression,
-    pivotValues: Seq[Expression],
+    pivotValues: Seq[Literal],
     aggregates: Seq[Expression],
     child: LogicalPlan) extends UnaryNode {
   override lazy val resolved = false // Pivot will be replaced after being resolved.

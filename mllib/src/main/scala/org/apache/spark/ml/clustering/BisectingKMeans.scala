@@ -274,7 +274,7 @@ class BisectingKMeans @Since("2.0.0") (
     val parentModel = bkm.run(rdd)
     val model = copyValues(new BisectingKMeansModel(uid, parentModel).setParent(this))
     val summary = new BisectingKMeansSummary(
-      model.transform(dataset), $(predictionCol), $(featuresCol), $(k), $(maxIter))
+      model.transform(dataset), $(predictionCol), $(featuresCol), $(k))
     model.setSummary(Some(summary))
     instr.logNamedValue("clusterSizes", summary.clusterSizes)
     instr.logSuccess(model)
@@ -304,7 +304,6 @@ object BisectingKMeans extends DefaultParamsReadable[BisectingKMeans] {
  * @param predictionCol  Name for column of predicted clusters in `predictions`.
  * @param featuresCol  Name for column of features in `predictions`.
  * @param k  Number of clusters.
- * @param numIter  Number of iterations.
  */
 @Since("2.1.0")
 @Experimental
@@ -312,5 +311,4 @@ class BisectingKMeansSummary private[clustering] (
     predictions: DataFrame,
     predictionCol: String,
     featuresCol: String,
-    k: Int,
-    numIter: Int) extends ClusteringSummary(predictions, predictionCol, featuresCol, k, numIter)
+    k: Int) extends ClusteringSummary(predictions, predictionCol, featuresCol, k)

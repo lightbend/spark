@@ -315,10 +315,8 @@ object UnsupportedOperationChecker {
         case GroupingSets(_, _, child, _) if child.isStreaming =>
           throwError("GroupingSets is not supported on streaming DataFrames/Datasets")
 
-        case GlobalLimit(_, _) | LocalLimit(_, _)
-            if subPlan.children.forall(_.isStreaming) && outputMode == InternalOutputModes.Update =>
-          throwError("Limits are not supported on streaming DataFrames/Datasets in Update " +
-            "output mode")
+        case GlobalLimit(_, _) | LocalLimit(_, _) if subPlan.children.forall(_.isStreaming) =>
+          throwError("Limits are not supported on streaming DataFrames/Datasets")
 
         case Sort(_, _, _) if !containsCompleteData(subPlan) =>
           throwError("Sorting is not supported on streaming DataFrames/Datasets, unless it is on " +

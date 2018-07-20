@@ -811,12 +811,10 @@ private[spark] class Client(
 
     // Finally, update the Spark config to propagate PYTHONPATH to the AM and executors.
     if (pythonPath.nonEmpty) {
-      val pythonPathList = (sys.env.get("PYTHONPATH") ++ pythonPath)
-      env("PYTHONPATH") = (env.get("PYTHONPATH") ++ pythonPathList)
+      val pythonPathStr = (sys.env.get("PYTHONPATH") ++ pythonPath)
         .mkString(ApplicationConstants.CLASS_PATH_SEPARATOR)
-      val pythonPathExecutorEnv = (sparkConf.getExecutorEnv.toMap.get("PYTHONPATH") ++
-        pythonPathList).mkString(ApplicationConstants.CLASS_PATH_SEPARATOR)
-      sparkConf.setExecutorEnv("PYTHONPATH", pythonPathExecutorEnv)
+      env("PYTHONPATH") = pythonPathStr
+      sparkConf.setExecutorEnv("PYTHONPATH", pythonPathStr)
     }
 
     if (isClusterMode) {

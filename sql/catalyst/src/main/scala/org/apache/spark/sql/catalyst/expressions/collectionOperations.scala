@@ -89,9 +89,15 @@ trait BinaryArrayExpressionWithImplicitCast extends BinaryExpression
       > SELECT _FUNC_(NULL);
        -1
   """)
-case class Size(child: Expression) extends UnaryExpression with ExpectsInputTypes {
+case class Size(
+    child: Expression,
+    legacySizeOfNull: Boolean)
+  extends UnaryExpression with ExpectsInputTypes {
 
-  val legacySizeOfNull = SQLConf.get.legacySizeOfNull
+  def this(child: Expression) =
+    this(
+      child,
+      legacySizeOfNull = SQLConf.get.getConf(SQLConf.LEGACY_SIZE_OF_NULL))
 
   override def dataType: DataType = IntegerType
   override def inputTypes: Seq[AbstractDataType] = Seq(TypeCollection(ArrayType, MapType))
@@ -168,22 +174,27 @@ case class ArraysZip(children: Seq[Expression]) extends Expression with ExpectsI
 
   override def inputTypes: Seq[AbstractDataType] = Seq.fill(children.length)(ArrayType)
 
-  @transient override lazy val dataType: DataType = {
+  override def dataType: DataType = ArrayType(mountSchema)
+
+  override def nullable: Boolean = children.exists(_.nullable)
+
+  private lazy val arrayTypes = children.map(_.dataType.asInstanceOf[ArrayType])
+
+  private lazy val arrayElementTypes = arrayTypes.map(_.elementType)
+
+  @transient private lazy val mountSchema: StructType = {
     val fields = children.zip(arrayElementTypes).zipWithIndex.map {
       case ((expr: NamedExpression, elementType), _) =>
         StructField(expr.name, elementType, nullable = true)
       case ((_, elementType), idx) =>
         StructField(idx.toString, elementType, nullable = true)
     }
-    ArrayType(StructType(fields), containsNull = false)
+    StructType(fields)
   }
 
-  override def nullable: Boolean = children.exists(_.nullable)
+  @transient lazy val numberOfArrays: Int = children.length
 
-  @transient private lazy val arrayElementTypes =
-    children.map(_.dataType.asInstanceOf[ArrayType].elementType)
-
-  private def genericArrayData = classOf[GenericArrayData].getName
+  @transient lazy val genericArrayData = classOf[GenericArrayData].getName
 
   def emptyInputGenCode(ev: ExprCode): ExprCode = {
     ev.copy(code"""
@@ -251,7 +262,7 @@ case class ArraysZip(children: Seq[Expression]) extends Expression with ExpectsI
         ("ArrayData[]", arrVals) :: Nil)
 
     val initVariables = s"""
-      |ArrayData[] $arrVals = new ArrayData[${children.length}];
+      |ArrayData[] $arrVals = new ArrayData[$numberOfArrays];
       |int $biggestCardinality = 0;
       |${CodeGenerator.javaType(dataType)} ${ev.value} = null;
     """.stripMargin
@@ -263,7 +274,7 @@ case class ArraysZip(children: Seq[Expression]) extends Expression with ExpectsI
       |if (!${ev.isNull}) {
       |  Object[] $args = new Object[$biggestCardinality];
       |  for (int $i = 0; $i < $biggestCardinality; $i ++) {
-      |    Object[] $currentRow = new Object[${children.length}];
+      |    Object[] $currentRow = new Object[$numberOfArrays];
       |    $getValueForTypeSplitted
       |    $args[$i] = new $genericInternalRow($currentRow);
       |  }
@@ -273,7 +284,7 @@ case class ArraysZip(children: Seq[Expression]) extends Expression with ExpectsI
   }
 
   override def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
-    if (children.length == 0) {
+    if (numberOfArrays == 0) {
       emptyInputGenCode(ev)
     } else {
       nonEmptyInputGenCode(ctx, ev)
@@ -355,7 +366,7 @@ case class MapEntries(child: Expression) extends UnaryExpression with ExpectsInp
 
   override def inputTypes: Seq[AbstractDataType] = Seq(MapType)
 
-  @transient private lazy val childDataType: MapType = child.dataType.asInstanceOf[MapType]
+  lazy val childDataType: MapType = child.dataType.asInstanceOf[MapType]
 
   override def dataType: DataType = {
     ArrayType(
@@ -493,233 +504,6 @@ case class MapEntries(child: Expression) extends UnaryExpression with ExpectsInp
 }
 
 /**
- * Returns the union of all the given maps.
- */
-@ExpressionDescription(
-  usage = "_FUNC_(map, ...) - Returns the union of all the given maps",
-  examples = """
-    Examples:
-      > SELECT _FUNC_(map(1, 'a', 2, 'b'), map(2, 'c', 3, 'd'));
-       [[1 -> "a"], [2 -> "b"], [2 -> "c"], [3 -> "d"]]
-  """, since = "2.4.0")
-case class MapConcat(children: Seq[Expression]) extends ComplexTypeMergingExpression {
-
-  override def checkInputDataTypes(): TypeCheckResult = {
-    var funcName = s"function $prettyName"
-    if (children.exists(!_.dataType.isInstanceOf[MapType])) {
-      TypeCheckResult.TypeCheckFailure(
-        s"input to $funcName should all be of type map, but it's " +
-          children.map(_.dataType.simpleString).mkString("[", ", ", "]"))
-    } else {
-      TypeUtils.checkForSameTypeInputExpr(children.map(_.dataType), funcName)
-    }
-  }
-
-  @transient override lazy val dataType: MapType = {
-    if (children.isEmpty) {
-      MapType(StringType, StringType)
-    } else {
-      super.dataType.asInstanceOf[MapType]
-    }
-  }
-
-  override def nullable: Boolean = children.exists(_.nullable)
-
-  override def eval(input: InternalRow): Any = {
-    val maps = children.map(_.eval(input))
-    if (maps.contains(null)) {
-      return null
-    }
-    val keyArrayDatas = maps.map(_.asInstanceOf[MapData].keyArray())
-    val valueArrayDatas = maps.map(_.asInstanceOf[MapData].valueArray())
-
-    val numElements = keyArrayDatas.foldLeft(0L)((sum, ad) => sum + ad.numElements())
-    if (numElements > ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH) {
-      throw new RuntimeException(s"Unsuccessful attempt to concat maps with $numElements " +
-        s"elements due to exceeding the map size limit " +
-        s"${ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH}.")
-    }
-    val finalKeyArray = new Array[AnyRef](numElements.toInt)
-    val finalValueArray = new Array[AnyRef](numElements.toInt)
-    var position = 0
-    for (i <- keyArrayDatas.indices) {
-      val keyArray = keyArrayDatas(i).toObjectArray(dataType.keyType)
-      val valueArray = valueArrayDatas(i).toObjectArray(dataType.valueType)
-      Array.copy(keyArray, 0, finalKeyArray, position, keyArray.length)
-      Array.copy(valueArray, 0, finalValueArray, position, valueArray.length)
-      position += keyArray.length
-    }
-
-    new ArrayBasedMapData(new GenericArrayData(finalKeyArray),
-      new GenericArrayData(finalValueArray))
-  }
-
-  override def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
-    val mapCodes = children.map(_.genCode(ctx))
-    val keyType = dataType.keyType
-    val valueType = dataType.valueType
-    val argsName = ctx.freshName("args")
-    val hasNullName = ctx.freshName("hasNull")
-    val mapDataClass = classOf[MapData].getName
-    val arrayBasedMapDataClass = classOf[ArrayBasedMapData].getName
-    val arrayDataClass = classOf[ArrayData].getName
-
-    val init =
-      s"""
-        |$mapDataClass[] $argsName = new $mapDataClass[${mapCodes.size}];
-        |boolean ${ev.isNull}, $hasNullName = false;
-        |$mapDataClass ${ev.value} = null;
-      """.stripMargin
-
-    val assignments = mapCodes.zipWithIndex.map { case (m, i) =>
-      s"""
-         |if (!$hasNullName) {
-         |  ${m.code}
-         |  $argsName[$i] = ${m.value};
-         |  if (${m.isNull}) {
-         |    $hasNullName = true;
-         |  }
-         |}
-       """.stripMargin
-    }
-
-    val codes = ctx.splitExpressionsWithCurrentInputs(
-      expressions = assignments,
-      funcName = "getMapConcatInputs",
-      extraArguments = (s"$mapDataClass[]", argsName) :: ("boolean", hasNullName) :: Nil,
-      returnType = "boolean",
-      makeSplitFunction = body =>
-        s"""
-           |$body
-           |return $hasNullName;
-        """.stripMargin,
-      foldFunctions = _.map(funcCall => s"$hasNullName = $funcCall;").mkString("\n")
-    )
-
-    val idxName = ctx.freshName("idx")
-    val numElementsName = ctx.freshName("numElems")
-    val finKeysName = ctx.freshName("finalKeys")
-    val finValsName = ctx.freshName("finalValues")
-
-    val keyConcatenator = if (CodeGenerator.isPrimitiveType(keyType)) {
-      genCodeForPrimitiveArrays(ctx, keyType, false)
-    } else {
-      genCodeForNonPrimitiveArrays(ctx, keyType)
-    }
-
-    val valueConcatenator = if (CodeGenerator.isPrimitiveType(valueType)) {
-      genCodeForPrimitiveArrays(ctx, valueType, dataType.valueContainsNull)
-    } else {
-      genCodeForNonPrimitiveArrays(ctx, valueType)
-    }
-
-    val keyArgsName = ctx.freshName("keyArgs")
-    val valArgsName = ctx.freshName("valArgs")
-
-    val mapMerge =
-      s"""
-        |${ev.isNull} = $hasNullName;
-        |if (!${ev.isNull}) {
-        |  $arrayDataClass[] $keyArgsName = new $arrayDataClass[${mapCodes.size}];
-        |  $arrayDataClass[] $valArgsName = new $arrayDataClass[${mapCodes.size}];
-        |  long $numElementsName = 0;
-        |  for (int $idxName = 0; $idxName < $argsName.length; $idxName++) {
-        |    $keyArgsName[$idxName] = $argsName[$idxName].keyArray();
-        |    $valArgsName[$idxName] = $argsName[$idxName].valueArray();
-        |    $numElementsName += $argsName[$idxName].numElements();
-        |  }
-        |  if ($numElementsName > ${ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH}) {
-        |    throw new RuntimeException("Unsuccessful attempt to concat maps with " +
-        |       $numElementsName + " elements due to exceeding the map size limit " +
-        |       "${ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH}.");
-        |  }
-        |  $arrayDataClass $finKeysName = $keyConcatenator.concat($keyArgsName,
-        |    (int) $numElementsName);
-        |  $arrayDataClass $finValsName = $valueConcatenator.concat($valArgsName,
-        |    (int) $numElementsName);
-        |  ${ev.value} = new $arrayBasedMapDataClass($finKeysName, $finValsName);
-        |}
-      """.stripMargin
-
-    ev.copy(
-      code = code"""
-        |$init
-        |$codes
-        |$mapMerge
-      """.stripMargin)
-  }
-
-  private def genCodeForPrimitiveArrays(
-      ctx: CodegenContext,
-      elementType: DataType,
-      checkForNull: Boolean): String = {
-    val counter = ctx.freshName("counter")
-    val arrayData = ctx.freshName("arrayData")
-    val argsName = ctx.freshName("args")
-    val numElemName = ctx.freshName("numElements")
-    val primitiveValueTypeName = CodeGenerator.primitiveTypeName(elementType)
-
-    val setterCode1 =
-      s"""
-         |$arrayData.set$primitiveValueTypeName(
-         |  $counter,
-         |  ${CodeGenerator.getValue(s"$argsName[y]", elementType, "z")}
-         |);""".stripMargin
-
-    val setterCode = if (checkForNull) {
-      s"""
-         |if ($argsName[y].isNullAt(z)) {
-         |  $arrayData.setNullAt($counter);
-         |} else {
-         |  $setterCode1
-         |}""".stripMargin
-    } else {
-      setterCode1
-    }
-
-    s"""
-       |new Object() {
-       |  public ArrayData concat(${classOf[ArrayData].getName}[] $argsName, int $numElemName) {
-       |    ${ctx.createUnsafeArray(arrayData, numElemName, elementType, s" $prettyName failed.")}
-       |    int $counter = 0;
-       |    for (int y = 0; y < ${children.length}; y++) {
-       |      for (int z = 0; z < $argsName[y].numElements(); z++) {
-       |        $setterCode
-       |        $counter++;
-       |      }
-       |    }
-       |    return $arrayData;
-       |  }
-       |}""".stripMargin.stripPrefix("\n")
-  }
-
-  private def genCodeForNonPrimitiveArrays(ctx: CodegenContext, elementType: DataType): String = {
-    val genericArrayClass = classOf[GenericArrayData].getName
-    val arrayData = ctx.freshName("arrayObjects")
-    val counter = ctx.freshName("counter")
-    val argsName = ctx.freshName("args")
-    val numElemName = ctx.freshName("numElements")
-
-    s"""
-       |new Object() {
-       |  public ArrayData concat(${classOf[ArrayData].getName}[] $argsName, int $numElemName) {;
-       |    Object[] $arrayData = new Object[$numElemName];
-       |    int $counter = 0;
-       |    for (int y = 0; y < ${children.length}; y++) {
-       |      for (int z = 0; z < $argsName[y].numElements(); z++) {
-       |        $arrayData[$counter] = ${CodeGenerator.getValue(s"$argsName[y]", elementType, "z")};
-       |        $counter++;
-       |      }
-       |    }
-       |    return new $genericArrayClass($arrayData);
-       |  }
-       |}""".stripMargin.stripPrefix("\n")
-  }
-
-  override def prettyName: String = "map_concat"
-}
-
-/**
  * Returns a map created from the given array of entries.
  */
 @ExpressionDescription(
@@ -742,11 +526,11 @@ case class MapFromEntries(child: Expression) extends UnaryExpression {
     case _ => None
   }
 
-  @transient private lazy val nullEntries: Boolean = dataTypeDetails.get._3
+  private def nullEntries: Boolean = dataTypeDetails.get._3
 
   override def nullable: Boolean = child.nullable || nullEntries
 
-  @transient override lazy val dataType: MapType = dataTypeDetails.get._1
+  override def dataType: MapType = dataTypeDetails.get._1
 
   override def checkInputDataTypes(): TypeCheckResult = dataTypeDetails match {
     case Some(_) => TypeCheckResult.TypeCheckSuccess
@@ -944,7 +728,8 @@ trait ArraySortLike extends ExpectsInputTypes {
 
   protected def nullOrder: NullOrder
 
-  @transient private lazy val lt: Comparator[Any] = {
+  @transient
+  private lazy val lt: Comparator[Any] = {
     val ordering = arrayExpression.dataType match {
       case _ @ ArrayType(n: AtomicType, _) => n.ordering.asInstanceOf[Ordering[Any]]
       case _ @ ArrayType(a: ArrayType, _) => a.interpretedOrdering.asInstanceOf[Ordering[Any]]
@@ -966,7 +751,8 @@ trait ArraySortLike extends ExpectsInputTypes {
     }
   }
 
-  @transient private lazy val gt: Comparator[Any] = {
+  @transient
+  private lazy val gt: Comparator[Any] = {
     val ordering = arrayExpression.dataType match {
       case _ @ ArrayType(n: AtomicType, _) => n.ordering.asInstanceOf[Ordering[Any]]
       case _ @ ArrayType(a: ArrayType, _) => a.interpretedOrdering.asInstanceOf[Ordering[Any]]
@@ -982,15 +768,13 @@ trait ArraySortLike extends ExpectsInputTypes {
         } else if (o2 == null) {
           nullOrder
         } else {
-          ordering.compare(o2, o1)
+          -ordering.compare(o1, o2)
         }
       }
     }
   }
 
-  @transient lazy val elementType: DataType =
-    arrayExpression.dataType.asInstanceOf[ArrayType].elementType
-
+  def elementType: DataType = arrayExpression.dataType.asInstanceOf[ArrayType].elementType
   def containsNull: Boolean = arrayExpression.dataType.asInstanceOf[ArrayType].containsNull
 
   def sortEval(array: Any, ascending: Boolean): Any = {
@@ -1206,7 +990,7 @@ case class Reverse(child: Expression) extends UnaryExpression with ImplicitCastI
 
   override def dataType: DataType = child.dataType
 
-  @transient private lazy val elementType: DataType = dataType.asInstanceOf[ArrayType].elementType
+  lazy val elementType: DataType = dataType.asInstanceOf[ArrayType].elementType
 
   override def nullSafeEval(input: Any): Any = input match {
     case a: ArrayData => new GenericArrayData(a.toObjectArray(elementType).reverse)
@@ -1301,7 +1085,7 @@ case class ArrayContains(left: Expression, right: Expression)
     if (right.dataType == NullType) {
       TypeCheckResult.TypeCheckFailure("Null typed values cannot be used as arguments")
     } else if (!left.dataType.isInstanceOf[ArrayType]
-      || !left.dataType.asInstanceOf[ArrayType].elementType.sameType(right.dataType)) {
+      || left.dataType.asInstanceOf[ArrayType].elementType != right.dataType) {
       TypeCheckResult.TypeCheckFailure(
         "Arguments must be an array followed by a value of same type as the array members")
     } else {
@@ -1596,9 +1380,9 @@ case class Slice(x: Expression, start: Expression, length: Expression)
 
   override def inputTypes: Seq[AbstractDataType] = Seq(ArrayType, IntegerType, IntegerType)
 
-  @transient override lazy val children: Seq[Expression] = Seq(x, start, length) // called from eval
+  override def children: Seq[Expression] = Seq(x, start, length)
 
-  @transient private lazy val elementType: DataType = x.dataType.asInstanceOf[ArrayType].elementType
+  lazy val elementType: DataType = x.dataType.asInstanceOf[ArrayType].elementType
 
   override def nullSafeEval(xVal: Any, startVal: Any, lengthVal: Any): Any = {
     val startInt = startVal.asInstanceOf[Int]
@@ -1884,7 +1668,7 @@ case class ArrayMin(child: Expression) extends UnaryExpression with ImplicitCast
 
   override def inputTypes: Seq[AbstractDataType] = Seq(ArrayType)
 
-  @transient private lazy val ordering = TypeUtils.getInterpretedOrdering(dataType)
+  private lazy val ordering = TypeUtils.getInterpretedOrdering(dataType)
 
   override def checkInputDataTypes(): TypeCheckResult = {
     val typeCheckResult = super.checkInputDataTypes()
@@ -1925,7 +1709,7 @@ case class ArrayMin(child: Expression) extends UnaryExpression with ImplicitCast
     min
   }
 
-  @transient override lazy val dataType: DataType = child.dataType match {
+  override def dataType: DataType = child.dataType match {
     case ArrayType(dt, _) => dt
     case _ => throw new IllegalStateException(s"$prettyName accepts only arrays.")
   }
@@ -1949,7 +1733,7 @@ case class ArrayMax(child: Expression) extends UnaryExpression with ImplicitCast
 
   override def inputTypes: Seq[AbstractDataType] = Seq(ArrayType)
 
-  @transient private lazy val ordering = TypeUtils.getInterpretedOrdering(dataType)
+  private lazy val ordering = TypeUtils.getInterpretedOrdering(dataType)
 
   override def checkInputDataTypes(): TypeCheckResult = {
     val typeCheckResult = super.checkInputDataTypes()
@@ -1990,7 +1774,7 @@ case class ArrayMax(child: Expression) extends UnaryExpression with ImplicitCast
     max
   }
 
-  @transient override lazy val dataType: DataType = child.dataType match {
+  override def dataType: DataType = child.dataType match {
     case ArrayType(dt, _) => dt
     case _ => throw new IllegalStateException(s"$prettyName accepts only arrays.")
   }
@@ -2092,13 +1876,10 @@ case class ArrayPosition(left: Expression, right: Expression)
   since = "2.4.0")
 case class ElementAt(left: Expression, right: Expression) extends GetMapValueUtil {
 
-  @transient private lazy val mapKeyType = left.dataType.asInstanceOf[MapType].keyType
+  @transient private lazy val ordering: Ordering[Any] =
+    TypeUtils.getInterpretedOrdering(left.dataType.asInstanceOf[MapType].keyType)
 
-  @transient private lazy val arrayContainsNull = left.dataType.asInstanceOf[ArrayType].containsNull
-
-  @transient private lazy val ordering: Ordering[Any] = TypeUtils.getInterpretedOrdering(mapKeyType)
-
-  @transient override lazy val dataType: DataType = left.dataType match {
+  override def dataType: DataType = left.dataType match {
     case ArrayType(elementType, _) => elementType
     case MapType(_, valueType, _) => valueType
   }
@@ -2107,7 +1888,7 @@ case class ElementAt(left: Expression, right: Expression) extends GetMapValueUti
     Seq(TypeCollection(ArrayType, MapType),
       left.dataType match {
         case _: ArrayType => IntegerType
-        case _: MapType => mapKeyType
+        case _: MapType => left.dataType.asInstanceOf[MapType].keyType
         case _ => AnyDataType // no match for a wrong 'left' expression type
       }
     )
@@ -2117,7 +1898,8 @@ case class ElementAt(left: Expression, right: Expression) extends GetMapValueUti
     super.checkInputDataTypes() match {
       case f: TypeCheckResult.TypeCheckFailure => f
       case TypeCheckResult.TypeCheckSuccess if left.dataType.isInstanceOf[MapType] =>
-        TypeUtils.checkForOrderingExpr(mapKeyType, s"function $prettyName")
+        TypeUtils.checkForOrderingExpr(
+          left.dataType.asInstanceOf[MapType].keyType, s"function $prettyName")
       case TypeCheckResult.TypeCheckSuccess => TypeCheckResult.TypeCheckSuccess
     }
   }
@@ -2139,14 +1921,14 @@ case class ElementAt(left: Expression, right: Expression) extends GetMapValueUti
           } else {
             array.numElements() + index
           }
-          if (arrayContainsNull && array.isNullAt(idx)) {
+          if (left.dataType.asInstanceOf[ArrayType].containsNull && array.isNullAt(idx)) {
             null
           } else {
             array.get(idx, dataType)
           }
         }
       case _: MapType =>
-        getValueEval(value, ordinal, mapKeyType, ordering)
+        getValueEval(value, ordinal, left.dataType.asInstanceOf[MapType].keyType, ordering)
     }
   }
 
@@ -2155,7 +1937,7 @@ case class ElementAt(left: Expression, right: Expression) extends GetMapValueUti
       case _: ArrayType =>
         nullSafeCodeGen(ctx, ev, (eval1, eval2) => {
           val index = ctx.freshName("elementAtIndex")
-          val nullCheck = if (arrayContainsNull) {
+          val nullCheck = if (left.dataType.asInstanceOf[ArrayType].containsNull) {
             s"""
                |if ($eval1.isNullAt($index)) {
                |  ${ev.isNull} = true;
@@ -2204,9 +1986,11 @@ case class ElementAt(left: Expression, right: Expression) extends GetMapValueUti
       > SELECT _FUNC_(array(1, 2, 3), array(4, 5), array(6));
  |     [1,2,3,4,5,6]
   """)
-case class Concat(children: Seq[Expression]) extends ComplexTypeMergingExpression {
+case class Concat(children: Seq[Expression]) extends Expression {
 
-  private def allowedTypes: Seq[AbstractDataType] = Seq(StringType, BinaryType, ArrayType)
+  private val MAX_ARRAY_LENGTH: Int = ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH
+
+  val allowedTypes = Seq(StringType, BinaryType, ArrayType)
 
   override def checkInputDataTypes(): TypeCheckResult = {
     if (children.isEmpty) {
@@ -2223,15 +2007,9 @@ case class Concat(children: Seq[Expression]) extends ComplexTypeMergingExpressio
     }
   }
 
-  @transient override lazy val dataType: DataType = {
-    if (children.isEmpty) {
-      StringType
-    } else {
-      super.dataType
-    }
-  }
+  override def dataType: DataType = children.map(_.dataType).headOption.getOrElse(StringType)
 
-  private def javaType: String = CodeGenerator.javaType(dataType)
+  lazy val javaType: String = CodeGenerator.javaType(dataType)
 
   override def nullable: Boolean = children.exists(_.nullable)
 
@@ -2251,10 +2029,9 @@ case class Concat(children: Seq[Expression]) extends ComplexTypeMergingExpressio
       } else {
         val arrayData = inputs.map(_.asInstanceOf[ArrayData])
         val numberOfElements = arrayData.foldLeft(0L)((sum, ad) => sum + ad.numElements())
-        if (numberOfElements > ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH) {
+        if (numberOfElements > MAX_ARRAY_LENGTH) {
           throw new RuntimeException(s"Unsuccessful try to concat arrays with $numberOfElements" +
-            " elements due to exceeding the array size limit " +
-            ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH + ".")
+            s" elements due to exceeding the array size limit $MAX_ARRAY_LENGTH.")
         }
         val finalData = new Array[AnyRef](numberOfElements.toInt)
         var position = 0
@@ -2312,10 +2089,9 @@ case class Concat(children: Seq[Expression]) extends ComplexTypeMergingExpressio
         |for (int z = 0; z < ${children.length}; z++) {
         |  $numElements += args[z].numElements();
         |}
-        |if ($numElements > ${ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH}) {
+        |if ($numElements > $MAX_ARRAY_LENGTH) {
         |  throw new RuntimeException("Unsuccessful try to concat arrays with " + $numElements +
-        |    " elements due to exceeding the array size limit" +
-        |    " ${ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH}.");
+        |    " elements due to exceeding the array size limit $MAX_ARRAY_LENGTH.");
         |}
       """.stripMargin
 
@@ -2410,13 +2186,15 @@ case class Concat(children: Seq[Expression]) extends ComplexTypeMergingExpressio
   since = "2.4.0")
 case class Flatten(child: Expression) extends UnaryExpression {
 
-  private def childDataType: ArrayType = child.dataType.asInstanceOf[ArrayType]
+  private val MAX_ARRAY_LENGTH = ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH
+
+  private lazy val childDataType: ArrayType = child.dataType.asInstanceOf[ArrayType]
 
   override def nullable: Boolean = child.nullable || childDataType.containsNull
 
-  @transient override lazy val dataType: DataType = childDataType.elementType
+  override def dataType: DataType = childDataType.elementType
 
-  @transient private lazy val elementType: DataType = dataType.asInstanceOf[ArrayType].elementType
+  lazy val elementType: DataType = dataType.asInstanceOf[ArrayType].elementType
 
   override def checkInputDataTypes(): TypeCheckResult = child.dataType match {
     case ArrayType(_: ArrayType, _) =>
@@ -2436,10 +2214,9 @@ case class Flatten(child: Expression) extends UnaryExpression {
     } else {
       val arrayData = elements.map(_.asInstanceOf[ArrayData])
       val numberOfElements = arrayData.foldLeft(0L)((sum, e) => sum + e.numElements())
-      if (numberOfElements > ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH) {
+      if (numberOfElements > MAX_ARRAY_LENGTH) {
         throw new RuntimeException("Unsuccessful try to flatten an array of arrays with " +
-          s"$numberOfElements elements due to exceeding the array size limit " +
-          ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH + ".")
+          s"$numberOfElements elements due to exceeding the array size limit $MAX_ARRAY_LENGTH.")
       }
       val flattenedData = new Array(numberOfElements.toInt)
       var position = 0
@@ -2472,10 +2249,9 @@ case class Flatten(child: Expression) extends UnaryExpression {
       |for (int z = 0; z < $childVariableName.numElements(); z++) {
       |  $variableName += $childVariableName.getArray(z).numElements();
       |}
-      |if ($variableName > ${ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH}) {
+      |if ($variableName > $MAX_ARRAY_LENGTH) {
       |  throw new RuntimeException("Unsuccessful try to flatten an array of arrays with " +
-      |    $variableName + " elements due to exceeding the array size limit" +
-      |    " ${ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH}.");
+      |    $variableName + " elements due to exceeding the array size limit $MAX_ARRAY_LENGTH.");
       |}
       """.stripMargin
     (code, variableName)
@@ -2599,7 +2375,7 @@ case class Sequence(
 
   override def nullable: Boolean = children.exists(_.nullable)
 
-  override def dataType: ArrayType = ArrayType(start.dataType, containsNull = false)
+  override lazy val dataType: ArrayType = ArrayType(start.dataType, containsNull = false)
 
   override def checkInputDataTypes(): TypeCheckResult = {
     val startType = start.dataType
@@ -2630,7 +2406,7 @@ case class Sequence(
     stepOpt.map(step => if (step.dataType != CalendarIntervalType) Cast(step, widerType) else step),
     timeZoneId)
 
-  @transient private lazy val impl: SequenceImpl = dataType.elementType match {
+  private lazy val impl: SequenceImpl = dataType.elementType match {
     case iType: IntegralType =>
       type T = iType.InternalType
       val ct = ClassTag[T](iType.tag.mirror.runtimeClass(iType.tag.tpe))
@@ -2950,6 +2726,8 @@ object Sequence {
 case class ArrayRepeat(left: Expression, right: Expression)
   extends BinaryExpression with ExpectsInputTypes {
 
+  private val MAX_ARRAY_LENGTH = ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH
+
   override def dataType: ArrayType = ArrayType(left.dataType, left.nullable)
 
   override def inputTypes: Seq[AbstractDataType] = Seq(AnyDataType, IntegerType)
@@ -2961,9 +2739,9 @@ case class ArrayRepeat(left: Expression, right: Expression)
     if (count == null) {
       null
     } else {
-      if (count.asInstanceOf[Int] > ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH) {
+      if (count.asInstanceOf[Int] > MAX_ARRAY_LENGTH) {
         throw new RuntimeException(s"Unsuccessful try to create array with $count elements " +
-          s"due to exceeding the array size limit ${ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH}.");
+          s"due to exceeding the array size limit $MAX_ARRAY_LENGTH.");
       }
       val element = left.eval(input)
       new GenericArrayData(Array.fill(count.asInstanceOf[Int])(element))
@@ -3022,10 +2800,9 @@ case class ArrayRepeat(left: Expression, right: Expression)
          |if ($count > 0) {
          |  $numElements = $count;
          |}
-         |if ($numElements > ${ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH}) {
+         |if ($numElements > $MAX_ARRAY_LENGTH) {
          |  throw new RuntimeException("Unsuccessful try to create array with " + $numElements +
-         |    " elements due to exceeding the array size limit" +
-         |    " ${ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH}.");
+         |    " elements due to exceeding the array size limit $MAX_ARRAY_LENGTH.");
          |}
        """.stripMargin
 
@@ -3107,7 +2884,7 @@ case class ArrayRemove(left: Expression, right: Expression)
     Seq(ArrayType, elementType)
   }
 
-  private def elementType: DataType = left.dataType.asInstanceOf[ArrayType].elementType
+  lazy val elementType: DataType = left.dataType.asInstanceOf[ArrayType].elementType
 
   @transient private lazy val ordering: Ordering[Any] =
     TypeUtils.getInterpretedOrdering(right.dataType)
@@ -3224,7 +3001,7 @@ case class ArrayDistinct(child: Expression)
 
   override def dataType: DataType = child.dataType
 
-  @transient private lazy val elementType: DataType = dataType.asInstanceOf[ArrayType].elementType
+  @transient lazy val elementType: DataType = dataType.asInstanceOf[ArrayType].elementType
 
   @transient private lazy val ordering: Ordering[Any] =
     TypeUtils.getInterpretedOrdering(elementType)
@@ -3483,323 +3260,4 @@ case class ArrayDistinct(child: Expression)
   }
 
   override def prettyName: String = "array_distinct"
-}
-
-/**
- * Will become common base class for [[ArrayUnion]], ArrayIntersect, and ArrayExcept.
- */
-abstract class ArraySetLike extends BinaryArrayExpressionWithImplicitCast {
-  override def dataType: DataType = {
-    val dataTypes = children.map(_.dataType.asInstanceOf[ArrayType])
-    ArrayType(elementType, dataTypes.exists(_.containsNull))
-  }
-
-  override def checkInputDataTypes(): TypeCheckResult = {
-    val typeCheckResult = super.checkInputDataTypes()
-    if (typeCheckResult.isSuccess) {
-      TypeUtils.checkForOrderingExpr(dataType.asInstanceOf[ArrayType].elementType,
-        s"function $prettyName")
-    } else {
-      typeCheckResult
-    }
-  }
-
-  @transient protected lazy val ordering: Ordering[Any] =
-    TypeUtils.getInterpretedOrdering(elementType)
-
-  @transient protected lazy val elementTypeSupportEquals = elementType match {
-    case BinaryType => false
-    case _: AtomicType => true
-    case _ => false
-  }
-}
-
-object ArraySetLike {
-  def throwUnionLengthOverflowException(length: Int): Unit = {
-    throw new RuntimeException(s"Unsuccessful try to union arrays with $length " +
-      s"elements due to exceeding the array size limit " +
-      s"${ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH}.")
-  }
-}
-
-
-/**
- * Returns an array of the elements in the union of x and y, without duplicates
- */
-@ExpressionDescription(
-  usage = """
-    _FUNC_(array1, array2) - Returns an array of the elements in the union of array1 and array2,
-      without duplicates.
-  """,
-  examples = """
-    Examples:
-      > SELECT _FUNC_(array(1, 2, 3), array(1, 3, 5));
-       array(1, 2, 3, 5)
-  """,
-  since = "2.4.0")
-case class ArrayUnion(left: Expression, right: Expression) extends ArraySetLike {
-  var hsInt: OpenHashSet[Int] = _
-  var hsLong: OpenHashSet[Long] = _
-
-  def assignInt(array: ArrayData, idx: Int, resultArray: ArrayData, pos: Int): Boolean = {
-    val elem = array.getInt(idx)
-    if (!hsInt.contains(elem)) {
-      if (resultArray != null) {
-        resultArray.setInt(pos, elem)
-      }
-      hsInt.add(elem)
-      true
-    } else {
-      false
-    }
-  }
-
-  def assignLong(array: ArrayData, idx: Int, resultArray: ArrayData, pos: Int): Boolean = {
-    val elem = array.getLong(idx)
-    if (!hsLong.contains(elem)) {
-      if (resultArray != null) {
-        resultArray.setLong(pos, elem)
-      }
-      hsLong.add(elem)
-      true
-    } else {
-      false
-    }
-  }
-
-  def evalIntLongPrimitiveType(
-      array1: ArrayData,
-      array2: ArrayData,
-      resultArray: ArrayData,
-      isLongType: Boolean): Int = {
-    // store elements into resultArray
-    var nullElementSize = 0
-    var pos = 0
-    Seq(array1, array2).foreach { array =>
-      var i = 0
-      while (i < array.numElements()) {
-        val size = if (!isLongType) hsInt.size else hsLong.size
-        if (size + nullElementSize > ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH) {
-          ArraySetLike.throwUnionLengthOverflowException(size)
-        }
-        if (array.isNullAt(i)) {
-          if (nullElementSize == 0) {
-            if (resultArray != null) {
-              resultArray.setNullAt(pos)
-            }
-            pos += 1
-            nullElementSize = 1
-          }
-        } else {
-          val assigned = if (!isLongType) {
-            assignInt(array, i, resultArray, pos)
-          } else {
-            assignLong(array, i, resultArray, pos)
-          }
-          if (assigned) {
-            pos += 1
-          }
-        }
-        i += 1
-      }
-    }
-    pos
-  }
-
-  override def nullSafeEval(input1: Any, input2: Any): Any = {
-    val array1 = input1.asInstanceOf[ArrayData]
-    val array2 = input2.asInstanceOf[ArrayData]
-
-    if (elementTypeSupportEquals) {
-      elementType match {
-        case IntegerType =>
-          // avoid boxing of primitive int array elements
-          // calculate result array size
-          hsInt = new OpenHashSet[Int]
-          val elements = evalIntLongPrimitiveType(array1, array2, null, false)
-          hsInt = new OpenHashSet[Int]
-          val resultArray = if (UnsafeArrayData.shouldUseGenericArrayData(
-            IntegerType.defaultSize, elements)) {
-            new GenericArrayData(new Array[Any](elements))
-          } else {
-            UnsafeArrayData.forPrimitiveArray(
-              Platform.INT_ARRAY_OFFSET, elements, IntegerType.defaultSize)
-          }
-          evalIntLongPrimitiveType(array1, array2, resultArray, false)
-          resultArray
-        case LongType =>
-          // avoid boxing of primitive long array elements
-          // calculate result array size
-          hsLong = new OpenHashSet[Long]
-          val elements = evalIntLongPrimitiveType(array1, array2, null, true)
-          hsLong = new OpenHashSet[Long]
-          val resultArray = if (UnsafeArrayData.shouldUseGenericArrayData(
-            LongType.defaultSize, elements)) {
-            new GenericArrayData(new Array[Any](elements))
-          } else {
-            UnsafeArrayData.forPrimitiveArray(
-              Platform.LONG_ARRAY_OFFSET, elements, LongType.defaultSize)
-          }
-          evalIntLongPrimitiveType(array1, array2, resultArray, true)
-          resultArray
-        case _ =>
-          val arrayBuffer = new scala.collection.mutable.ArrayBuffer[Any]
-          val hs = new OpenHashSet[Any]
-          var foundNullElement = false
-          Seq(array1, array2).foreach { array =>
-            var i = 0
-            while (i < array.numElements()) {
-              if (array.isNullAt(i)) {
-                if (!foundNullElement) {
-                  arrayBuffer += null
-                  foundNullElement = true
-                }
-              } else {
-                val elem = array.get(i, elementType)
-                if (!hs.contains(elem)) {
-                  if (arrayBuffer.size > ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH) {
-                    ArraySetLike.throwUnionLengthOverflowException(arrayBuffer.size)
-                  }
-                  arrayBuffer += elem
-                  hs.add(elem)
-                }
-              }
-              i += 1
-            }
-          }
-          new GenericArrayData(arrayBuffer)
-      }
-    } else {
-      ArrayUnion.unionOrdering(array1, array2, elementType, ordering)
-    }
-  }
-
-  override def doGenCode(ctx: CodegenContext, ev: ExprCode): ExprCode = {
-    val i = ctx.freshName("i")
-    val pos = ctx.freshName("pos")
-    val value = ctx.freshName("value")
-    val size = ctx.freshName("size")
-    val (postFix, openHashElementType, getter, setter, javaTypeName, castOp, arrayBuilder) =
-      if (elementTypeSupportEquals) {
-        elementType match {
-          case ByteType | ShortType | IntegerType | LongType =>
-            val ptName = CodeGenerator.primitiveTypeName(elementType)
-            val unsafeArray = ctx.freshName("unsafeArray")
-            (if (elementType == LongType) s"$$mcJ$$sp" else s"$$mcI$$sp",
-              if (elementType == LongType) "Long" else "Int",
-              s"get$ptName($i)", s"set$ptName($pos, $value)", CodeGenerator.javaType(elementType),
-              if (elementType == LongType) "(long)" else "(int)",
-              s"""
-                 |${ctx.createUnsafeArray(unsafeArray, size, elementType, s" $prettyName failed.")}
-                 |${ev.value} = $unsafeArray;
-               """.stripMargin)
-          case _ =>
-            val genericArrayData = classOf[GenericArrayData].getName
-            val et = ctx.addReferenceObj("elementType", elementType)
-            ("", "Object",
-              s"get($i, $et)", s"update($pos, $value)", "Object", "",
-              s"${ev.value} = new $genericArrayData(new Object[$size]);")
-        }
-      } else {
-        ("", "", "", "", "", "", "")
-      }
-
-    nullSafeCodeGen(ctx, ev, (array1, array2) => {
-      if (openHashElementType != "") {
-        // Here, we ensure elementTypeSupportEquals is true
-        val foundNullElement = ctx.freshName("foundNullElement")
-        val openHashSet = classOf[OpenHashSet[_]].getName
-        val classTag = s"scala.reflect.ClassTag$$.MODULE$$.$openHashElementType()"
-        val hs = ctx.freshName("hs")
-        val arrayData = classOf[ArrayData].getName
-        val arrays = ctx.freshName("arrays")
-        val array = ctx.freshName("array")
-        val arrayDataIdx = ctx.freshName("arrayDataIdx")
-        s"""
-           |$openHashSet $hs = new $openHashSet$postFix($classTag);
-           |boolean $foundNullElement = false;
-           |$arrayData[] $arrays = new $arrayData[]{$array1, $array2};
-           |for (int $arrayDataIdx = 0; $arrayDataIdx < 2; $arrayDataIdx++) {
-           |  $arrayData $array = $arrays[$arrayDataIdx];
-           |  for (int $i = 0; $i < $array.numElements(); $i++) {
-           |    if ($array.isNullAt($i)) {
-           |      $foundNullElement = true;
-           |    } else {
-           |      $hs.add$postFix($array.$getter);
-           |    }
-           |  }
-           |}
-           |int $size = $hs.size() + ($foundNullElement ? 1 : 0);
-           |$arrayBuilder
-           |$hs = new $openHashSet$postFix($classTag);
-           |$foundNullElement = false;
-           |int $pos = 0;
-           |for (int $arrayDataIdx = 0; $arrayDataIdx < 2; $arrayDataIdx++) {
-           |  $arrayData $array = $arrays[$arrayDataIdx];
-           |  for (int $i = 0; $i < $array.numElements(); $i++) {
-           |    if ($array.isNullAt($i)) {
-           |      if (!$foundNullElement) {
-           |        ${ev.value}.setNullAt($pos++);
-           |        $foundNullElement = true;
-           |      }
-           |    } else {
-           |      $javaTypeName $value = $array.$getter;
-           |      if (!$hs.contains($castOp $value)) {
-           |        $hs.add$postFix($value);
-           |        ${ev.value}.$setter;
-           |        $pos++;
-           |      }
-           |    }
-           |  }
-           |}
-         """.stripMargin
-      } else {
-        val arrayUnion = classOf[ArrayUnion].getName
-        val et = ctx.addReferenceObj("elementTypeUnion", elementType)
-        val order = ctx.addReferenceObj("orderingUnion", ordering)
-        val method = "unionOrdering"
-        s"${ev.value} = $arrayUnion$$.MODULE$$.$method($array1, $array2, $et, $order);"
-      }
-    })
-  }
-
-  override def prettyName: String = "array_union"
-}
-
-object ArrayUnion {
-  def unionOrdering(
-      array1: ArrayData,
-      array2: ArrayData,
-      elementType: DataType,
-      ordering: Ordering[Any]): ArrayData = {
-    val arrayBuffer = new scala.collection.mutable.ArrayBuffer[Any]
-    var alreadyIncludeNull = false
-    Seq(array1, array2).foreach(_.foreach(elementType, (_, elem) => {
-      var found = false
-      if (elem == null) {
-        if (alreadyIncludeNull) {
-          found = true
-        } else {
-          alreadyIncludeNull = true
-        }
-      } else {
-        // check elem is already stored in arrayBuffer or not?
-        var j = 0
-        while (!found && j < arrayBuffer.size) {
-          val va = arrayBuffer(j)
-          if (va != null && ordering.equiv(va, elem)) {
-            found = true
-          }
-          j = j + 1
-        }
-      }
-      if (!found) {
-        if (arrayBuffer.length > ByteArrayMethods.MAX_ROUNDED_ARRAY_LENGTH) {
-          ArraySetLike.throwUnionLengthOverflowException(arrayBuffer.length)
-        }
-        arrayBuffer += elem
-      }
-    }))
-    new GenericArrayData(arrayBuffer)
-  }
 }

@@ -17,9 +17,6 @@
 
 package org.apache.spark.sql.catalyst.analysis
 
-import java.util.Locale
-
-import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 
@@ -509,39 +506,22 @@ class Analyzer(
     def apply(plan: LogicalPlan): LogicalPlan = plan transform {
       case p: Pivot if !p.childrenResolved || !p.aggregates.forall(_.resolved)
         || (p.groupByExprsOpt.isDefined && !p.groupByExprsOpt.get.forall(_.resolved))
-        || !p.pivotColumn.resolved || !p.pivotValues.forall(_.resolved) => p
+        || !p.pivotColumn.resolved => p
       case Pivot(groupByExprsOpt, pivotColumn, pivotValues, aggregates, child) =>
         // Check all aggregate expressions.
-        aggregates.foreach(checkValidAggregateExpression)
-        // Check all pivot values are literal and match pivot column data type.
-        val evalPivotValues = pivotValues.map { value =>
-          val foldable = value match {
-            case Alias(v, _) => v.foldable
-            case _ => value.foldable
+        aggregates.foreach { e =>
+          if (!isAggregateExpression(e)) {
+              throw new AnalysisException(
+                s"Aggregate expression required for pivot, found '$e'")
           }
-          if (!foldable) {
-            throw new AnalysisException(
-              s"Literal expressions required for pivot values, found '$value'")
-          }
-          if (!Cast.canCast(value.dataType, pivotColumn.dataType)) {
-            throw new AnalysisException(s"Invalid pivot value '$value': " +
-              s"value data type ${value.dataType.simpleString} does not match " +
-              s"pivot column data type ${pivotColumn.dataType.catalogString}")
-          }
-          Cast(value, pivotColumn.dataType, Some(conf.sessionLocalTimeZone)).eval(EmptyRow)
         }
         // Group-by expressions coming from SQL are implicit and need to be deduced.
         val groupByExprs = groupByExprsOpt.getOrElse(
           (child.outputSet -- aggregates.flatMap(_.references) -- pivotColumn.references).toSeq)
         val singleAgg = aggregates.size == 1
-        def outputName(value: Expression, aggregate: Expression): String = {
-          val stringValue = value match {
-            case n: NamedExpression => n.name
-            case _ =>
-              val utf8Value =
-                Cast(value, StringType, Some(conf.sessionLocalTimeZone)).eval(EmptyRow)
-              Option(utf8Value).map(_.toString).getOrElse("null")
-          }
+        def outputName(value: Literal, aggregate: Expression): String = {
+          val utf8Value = Cast(value, StringType, Some(conf.sessionLocalTimeZone)).eval(EmptyRow)
+          val stringValue: String = Option(utf8Value).map(_.toString).getOrElse("null")
           if (singleAgg) {
             stringValue
           } else {
@@ -556,10 +536,15 @@ class Analyzer(
           // Since evaluating |pivotValues| if statements for each input row can get slow this is an
           // alternate plan that instead uses two steps of aggregation.
           val namedAggExps: Seq[NamedExpression] = aggregates.map(a => Alias(a, a.sql)())
-          val bigGroup = groupByExprs ++ pivotColumn.references
+          val namedPivotCol = pivotColumn match {
+            case n: NamedExpression => n
+            case _ => Alias(pivotColumn, "__pivot_col")()
+          }
+          val bigGroup = groupByExprs :+ namedPivotCol
           val firstAgg = Aggregate(bigGroup, bigGroup ++ namedAggExps, child)
+          val castPivotValues = pivotValues.map(Cast(_, pivotColumn.dataType).eval(EmptyRow))
           val pivotAggs = namedAggExps.map { a =>
-            Alias(PivotFirst(pivotColumn, a.toAttribute, evalPivotValues)
+            Alias(PivotFirst(namedPivotCol.toAttribute, a.toAttribute, castPivotValues)
               .toAggregateExpression()
             , "__pivot_" + a.sql)()
           }
@@ -574,12 +559,8 @@ class Analyzer(
           Project(groupByExprsAttr ++ pivotOutputs, secondAgg)
         } else {
           val pivotAggregates: Seq[NamedExpression] = pivotValues.flatMap { value =>
-            def ifExpr(e: Expression) = {
-              If(
-                EqualNullSafe(
-                  pivotColumn,
-                  Cast(value, pivotColumn.dataType, Some(conf.sessionLocalTimeZone))),
-                e, Literal(null))
+            def ifExpr(expr: Expression) = {
+              If(EqualNullSafe(pivotColumn, value), expr, Literal(null))
             }
             aggregates.map { aggregate =>
               val filteredAggregate = aggregate.transformDown {
@@ -605,17 +586,12 @@ class Analyzer(
         }
     }
 
-    // Support any aggregate expression that can appear in an Aggregate plan except Pandas UDF.
-    // TODO: Support Pandas UDF.
-    private def checkValidAggregateExpression(expr: Expression): Unit = expr match {
-      case _: AggregateExpression => // OK and leave the argument check to CheckAnalysis.
-      case expr: PythonUDF if PythonUDF.isGroupedAggPandasUDF(expr) =>
-        failAnalysis("Pandas UDF aggregate expressions are currently not supported in pivot.")
-      case e: Attribute =>
-        failAnalysis(
-          s"Aggregate expression required for pivot, but '${e.sql}' " +
-          s"did not appear in any aggregate function.")
-      case e => e.children.foreach(checkValidAggregateExpression)
+    private def isAggregateExpression(expr: Expression): Boolean = {
+      expr match {
+        case Alias(e, _) => isAggregateExpression(e)
+        case AggregateExpression(_, _, _, _) => true
+        case _ => false
+      }
     }
   }
 
@@ -761,10 +737,6 @@ class Analyzer(
         case oldVersion @ Aggregate(_, aggregateExpressions, _)
             if findAliases(aggregateExpressions).intersect(conflictingAttributes).nonEmpty =>
           (oldVersion, oldVersion.copy(aggregateExpressions = newAliases(aggregateExpressions)))
-
-        case oldVersion @ FlatMapGroupsInPandas(_, _, output, _)
-            if oldVersion.outputSet.intersect(conflictingAttributes).nonEmpty =>
-          (oldVersion, oldVersion.copy(output = output.map(_.newInstance())))
 
         case oldVersion: Generate
             if oldVersion.producedAttributes.intersect(conflictingAttributes).nonEmpty =>
@@ -1153,8 +1125,7 @@ class Analyzer(
       case sa @ Sort(_, _, AnalysisBarrier(child: Aggregate)) => sa
       case sa @ Sort(_, _, child: Aggregate) => sa
 
-      case s @ Sort(order, _, child)
-          if (!s.resolved || s.missingInput.nonEmpty) && child.resolved =>
+      case s @ Sort(order, _, child) if !s.resolved && child.resolved =>
         val (newOrder, newChild) = resolveExprsAndAddMissingAttrs(order, child)
         val ordering = newOrder.map(_.asInstanceOf[SortOrder])
         if (child.output == newChild.output) {
@@ -1165,7 +1136,7 @@ class Analyzer(
           Project(child.output, newSort)
         }
 
-      case f @ Filter(cond, child) if (!f.resolved || f.missingInput.nonEmpty) && child.resolved =>
+      case f @ Filter(cond, child) if !f.resolved && child.resolved =>
         val (newCond, newChild) = resolveExprsAndAddMissingAttrs(Seq(cond), child)
         if (child.output == newChild.output) {
           f.copy(condition = newCond.head)
@@ -1176,17 +1147,10 @@ class Analyzer(
         }
     }
 
-    /**
-     * This method tries to resolve expressions and find missing attributes recursively. Specially,
-     * when the expressions used in `Sort` or `Filter` contain unresolved attributes or resolved
-     * attributes which are missed from child output. This method tries to find the missing
-     * attributes out and add into the projection.
-     */
     private def resolveExprsAndAddMissingAttrs(
         exprs: Seq[Expression], plan: LogicalPlan): (Seq[Expression], LogicalPlan) = {
-      // Missing attributes can be unresolved attributes or resolved attributes which are not in
-      // the output attributes of the plan.
-      if (exprs.forall(e => e.resolved && e.references.subsetOf(plan.outputSet))) {
+      if (exprs.forall(_.resolved)) {
+        // All given expressions are resolved, no need to continue anymore.
         (exprs, plan)
       } else {
         plan match {
@@ -1197,19 +1161,15 @@ class Analyzer(
             (newExprs, AnalysisBarrier(newChild))
 
           case p: Project =>
-            // Resolving expressions against current plan.
             val maybeResolvedExprs = exprs.map(resolveExpression(_, p))
-            // Recursively resolving expressions on the child of current plan.
             val (newExprs, newChild) = resolveExprsAndAddMissingAttrs(maybeResolvedExprs, p.child)
-            // If some attributes used by expressions are resolvable only on the rewritten child
-            // plan, we need to add them into original projection.
-            val missingAttrs = (AttributeSet(newExprs) -- p.outputSet).intersect(newChild.outputSet)
+            val missingAttrs = AttributeSet(newExprs) -- AttributeSet(maybeResolvedExprs)
             (newExprs, Project(p.projectList ++ missingAttrs, newChild))
 
           case a @ Aggregate(groupExprs, aggExprs, child) =>
             val maybeResolvedExprs = exprs.map(resolveExpression(_, a))
             val (newExprs, newChild) = resolveExprsAndAddMissingAttrs(maybeResolvedExprs, child)
-            val missingAttrs = (AttributeSet(newExprs) -- a.outputSet).intersect(newChild.outputSet)
+            val missingAttrs = AttributeSet(newExprs) -- AttributeSet(maybeResolvedExprs)
             if (missingAttrs.forall(attr => groupExprs.exists(_.semanticEquals(attr)))) {
               // All the missing attributes are grouping expressions, valid case.
               (newExprs, a.copy(aggregateExpressions = aggExprs ++ missingAttrs, child = newChild))
@@ -1244,46 +1204,16 @@ class Analyzer(
    * only performs simple existence check according to the function identifier to quickly identify
    * undefined functions without triggering relation resolution, which may incur potentially
    * expensive partition/schema discovery process in some cases.
-   * In order to avoid duplicate external functions lookup, the external function identifier will
-   * store in the local hash set externalFunctionNameSet.
+   *
    * @see [[ResolveFunctions]]
    * @see https://issues.apache.org/jira/browse/SPARK-19737
    */
   object LookupFunctions extends Rule[LogicalPlan] {
-    override def apply(plan: LogicalPlan): LogicalPlan = {
-      val externalFunctionNameSet = new mutable.HashSet[FunctionIdentifier]()
-      plan.transformAllExpressions {
-        case f: UnresolvedFunction
-          if externalFunctionNameSet.contains(normalizeFuncName(f.name)) => f
-        case f: UnresolvedFunction if catalog.isRegisteredFunction(f.name) => f
-        case f: UnresolvedFunction if catalog.isPersistentFunction(f.name) =>
-          externalFunctionNameSet.add(normalizeFuncName(f.name))
-          f
-        case f: UnresolvedFunction =>
-          withPosition(f) {
-            throw new NoSuchFunctionException(f.name.database.getOrElse(catalog.getCurrentDatabase),
-              f.name.funcName)
-          }
-      }
-    }
-
-    def normalizeFuncName(name: FunctionIdentifier): FunctionIdentifier = {
-      val funcName = if (conf.caseSensitiveAnalysis) {
-        name.funcName
-      } else {
-        name.funcName.toLowerCase(Locale.ROOT)
-      }
-
-      val databaseName = name.database match {
-        case Some(a) => formatDatabaseName(a)
-        case None => catalog.getCurrentDatabase
-      }
-
-      FunctionIdentifier(funcName, Some(databaseName))
-    }
-
-    protected def formatDatabaseName(name: String): String = {
-      if (conf.caseSensitiveAnalysis) name else name.toLowerCase(Locale.ROOT)
+    override def apply(plan: LogicalPlan): LogicalPlan = plan.transformAllExpressions {
+      case f: UnresolvedFunction if !catalog.functionExists(f.name) =>
+        withPosition(f) {
+          throw new NoSuchFunctionException(f.name.database.getOrElse("default"), f.name.funcName)
+        }
     }
   }
 
@@ -1559,11 +1489,7 @@ class Analyzer(
 
         // Try resolving the ordering as though it is in the aggregate clause.
         try {
-          // If a sort order is unresolved, containing references not in aggregate, or containing
-          // `AggregateExpression`, we need to push down it to the underlying aggregate operator.
-          val unresolvedSortOrders = sortOrder.filter { s =>
-            !s.resolved || !s.references.subsetOf(aggregate.outputSet) || containsAggregate(s)
-          }
+          val unresolvedSortOrders = sortOrder.filter(s => !s.resolved || containsAggregate(s))
           val aliasedOrdering =
             unresolvedSortOrders.map(o => Alias(o.child, "aggOrder")())
           val aggregatedOrdering = aggregate.copy(aggregateExpressions = aliasedOrdering)

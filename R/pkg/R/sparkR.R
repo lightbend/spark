@@ -167,7 +167,7 @@ sparkR.sparkContext <- function(
     submitOps <- getClientModeSparkSubmitOpts(
         Sys.getenv("SPARKR_SUBMIT_ARGS", "sparkr-shell"),
         sparkEnvirMap)
-    invisible(checkJavaVersion())
+    checkJavaVersion()
     launchBackend(
         args = path,
         sparkHome = sparkHome,

@@ -67,7 +67,6 @@ class DriverServiceFeatureStepSuite extends SparkFunSuite with BeforeAndAfter {
         Map.empty,
         Map.empty,
         Map.empty,
-        Nil,
         Seq.empty[String]))
     assert(configurationStep.configurePod(SparkPod.initialPod()) === SparkPod.initialPod())
     assert(configurationStep.getAdditionalKubernetesResources().size === 1)
@@ -99,7 +98,6 @@ class DriverServiceFeatureStepSuite extends SparkFunSuite with BeforeAndAfter {
         Map.empty,
         Map.empty,
         Map.empty,
-        Nil,
         Seq.empty[String]))
     val expectedServiceName = SHORT_RESOURCE_NAME_PREFIX +
       DriverServiceFeatureStep.DRIVER_SVC_POSTFIX
@@ -121,7 +119,6 @@ class DriverServiceFeatureStepSuite extends SparkFunSuite with BeforeAndAfter {
         Map.empty,
         Map.empty,
         Map.empty,
-        Nil,
         Seq.empty[String]))
     val resolvedService = configurationStep
       .getAdditionalKubernetesResources()
@@ -152,7 +149,6 @@ class DriverServiceFeatureStepSuite extends SparkFunSuite with BeforeAndAfter {
         Map.empty,
         Map.empty,
         Map.empty,
-        Nil,
         Seq.empty[String]),
       clock)
     val driverService = configurationStep
@@ -180,7 +176,6 @@ class DriverServiceFeatureStepSuite extends SparkFunSuite with BeforeAndAfter {
           Map.empty,
           Map.empty,
           Map.empty,
-          Nil,
           Seq.empty[String]),
         clock)
       fail("The driver bind address should not be allowed.")
@@ -206,7 +201,6 @@ class DriverServiceFeatureStepSuite extends SparkFunSuite with BeforeAndAfter {
           Map.empty,
           Map.empty,
           Map.empty,
-          Nil,
           Seq.empty[String]),
         clock)
       fail("The driver host address should not be allowed.")

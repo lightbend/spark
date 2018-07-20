@@ -630,27 +630,9 @@ class AstBuilder(conf: SQLConf) extends SqlBaseBaseVisitor[AnyRef] with Logging 
     val aggregates = Option(ctx.aggregates).toSeq
       .flatMap(_.namedExpression.asScala)
       .map(typedVisit[Expression])
-    val pivotColumn = if (ctx.pivotColumn.identifiers.size == 1) {
-      UnresolvedAttribute.quoted(ctx.pivotColumn.identifier.getText)
-    } else {
-      CreateStruct(
-        ctx.pivotColumn.identifiers.asScala.map(
-          identifier => UnresolvedAttribute.quoted(identifier.getText)))
-    }
-    val pivotValues = ctx.pivotValues.asScala.map(visitPivotValue)
+    val pivotColumn = UnresolvedAttribute.quoted(ctx.pivotColumn.getText)
+    val pivotValues = ctx.pivotValues.asScala.map(typedVisit[Expression]).map(Literal.apply)
     Pivot(None, pivotColumn, pivotValues, aggregates, query)
-  }
-
-  /**
-   * Create a Pivot column value with or without an alias.
-   */
-  override def visitPivotValue(ctx: PivotValueContext): Expression = withOrigin(ctx) {
-    val e = expression(ctx.expression)
-    if (ctx.identifier != null) {
-      Alias(e, ctx.identifier.getText)()
-    } else {
-      e
-    }
   }
 
   /**
@@ -1525,7 +1507,7 @@ class AstBuilder(conf: SQLConf) extends SqlBaseBaseVisitor[AnyRef] with Logging 
         case "TIMESTAMP" =>
           Literal(Timestamp.valueOf(value))
         case "X" =>
-          val padding = if (value.length % 2 != 0) "0" else ""
+          val padding = if (value.length % 2 == 1) "0" else ""
           Literal(DatatypeConverter.parseHexBinary(padding + value))
         case other =>
           throw new ParseException(s"Literals of type '$other' are currently not supported.", ctx)

@@ -170,16 +170,6 @@ hive_thriftserver = Module(
     ]
 )
 
-avro = Module(
-    name="avro",
-    dependencies=[sql],
-    source_file_regexes=[
-        "external/avro",
-    ],
-    sbt_test_goals=[
-        "avro/test",
-    ]
-)
 
 sql_kafka = Module(
     name="sql-kafka-0-10",

@@ -96,11 +96,9 @@ object FileFormatWriter extends Logging {
 
     val caseInsensitiveOptions = CaseInsensitiveMap(options)
 
-    val dataSchema = dataColumns.toStructType
-    DataSourceUtils.verifyWriteSchema(fileFormat, dataSchema)
     // Note: prepareWrite has side effect. It sets "job".
     val outputWriterFactory =
-      fileFormat.prepareWrite(sparkSession, job, caseInsensitiveOptions, dataSchema)
+      fileFormat.prepareWrite(sparkSession, job, caseInsensitiveOptions, dataColumns.toStructType)
 
     val description = new WriteJobDescription(
       uuid = UUID.randomUUID().toString,

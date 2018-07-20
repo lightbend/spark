@@ -17,7 +17,7 @@
 
 package org.apache.spark.sql.catalyst.util
 
-import org.apache.spark.sql.catalyst.analysis.{TypeCheckResult, TypeCoercion}
+import org.apache.spark.sql.catalyst.analysis.TypeCheckResult
 import org.apache.spark.sql.catalyst.expressions.RowOrdering
 import org.apache.spark.sql.types._
 
@@ -42,12 +42,18 @@ object TypeUtils {
   }
 
   def checkForSameTypeInputExpr(types: Seq[DataType], caller: String): TypeCheckResult = {
-    if (TypeCoercion.haveSameType(types)) {
+    if (types.size <= 1) {
       TypeCheckResult.TypeCheckSuccess
     } else {
-      return TypeCheckResult.TypeCheckFailure(
-        s"input to $caller should all be the same type, but it's " +
-          types.map(_.simpleString).mkString("[", ", ", "]"))
+      val firstType = types.head
+      types.foreach { t =>
+        if (!t.sameType(firstType)) {
+          return TypeCheckResult.TypeCheckFailure(
+            s"input to $caller should all be the same type, but it's " +
+              types.map(_.simpleString).mkString("[", ", ", "]"))
+        }
+      }
+      TypeCheckResult.TypeCheckSuccess
     }
   }
 

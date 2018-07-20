@@ -21,10 +21,10 @@ import java.io.File
 
 import org.apache.spark.sql.{QueryTest, Row}
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.test.{SharedSQLContext, SQLTestUtils}
+import org.apache.spark.sql.test.SharedSQLContext
 import org.apache.spark.sql.types.{StringType, StructType}
 
-class WholeTextFileSuite extends QueryTest with SharedSQLContext  with SQLTestUtils {
+class WholeTextFileSuite extends QueryTest with SharedSQLContext {
 
   // Hadoop's FileSystem caching does not use the Configuration as part of its cache key, which
   // can cause Filesystem.get(Configuration) to return a cached instance created with a different
@@ -35,10 +35,13 @@ class WholeTextFileSuite extends QueryTest with SharedSQLContext  with SQLTestUt
   protected override def sparkConf =
     super.sparkConf.set("spark.hadoop.fs.file.impl.disable.cache", "true")
 
+  private def testFile: String = {
+    Thread.currentThread().getContextClassLoader.getResource("test-data/text-suite.txt").toString
+  }
+
   test("reading text file with option wholetext=true") {
     val df = spark.read.option("wholetext", "true")
-      .format("text")
-      .load(testFile("test-data/text-suite.txt"))
+      .format("text").load(testFile)
     // schema
     assert(df.schema == new StructType().add("value", StringType))
 

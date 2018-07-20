@@ -471,7 +471,7 @@ private[spark] class AppStatusStore(
 
   def operationGraphForJob(jobId: Int): Seq[RDDOperationGraph] = {
     val job = store.read(classOf[JobDataWrapper], jobId)
-    val stages = job.info.stageIds.sorted
+    val stages = job.info.stageIds
 
     stages.map { id =>
       val g = store.read(classOf[RDDOperationGraphWrapper], id).toRDDOperationGraph()

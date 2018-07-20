@@ -995,24 +995,20 @@ class SparkSubmitSuite
   }
 
   test("download remote resource if it is not supported by yarn service") {
-    testRemoteResources(enableHttpFs = false)
+    testRemoteResources(enableHttpFs = false, blacklistHttpFs = false)
   }
 
   test("avoid downloading remote resource if it is supported by yarn service") {
-    testRemoteResources(enableHttpFs = true)
+    testRemoteResources(enableHttpFs = true, blacklistHttpFs = false)
   }
 
   test("force download from blacklisted schemes") {
-    testRemoteResources(enableHttpFs = true, blacklistSchemes = Seq("http"))
-  }
-
-  test("force download for all the schemes") {
-    testRemoteResources(enableHttpFs = true, blacklistSchemes = Seq("*"))
+    testRemoteResources(enableHttpFs = true, blacklistHttpFs = true)
   }
 
   private def testRemoteResources(
       enableHttpFs: Boolean,
-      blacklistSchemes: Seq[String] = Nil): Unit = {
+      blacklistHttpFs: Boolean): Unit = {
     val hadoopConf = new Configuration()
     updateConfWithFakeS3Fs(hadoopConf)
     if (enableHttpFs) {
@@ -1029,8 +1025,8 @@ class SparkSubmitSuite
     val tmpHttpJar = TestUtils.createJarWithFiles(Map("test.resource" -> "USER"), tmpDir)
     val tmpHttpJarPath = s"http://${new File(tmpHttpJar.toURI).getAbsolutePath}"
 
-    val forceDownloadArgs = if (blacklistSchemes.nonEmpty) {
-      Seq("--conf", s"spark.yarn.dist.forceDownloadSchemes=${blacklistSchemes.mkString(",")}")
+    val forceDownloadArgs = if (blacklistHttpFs) {
+      Seq("--conf", "spark.yarn.dist.forceDownloadSchemes=http")
     } else {
       Nil
     }
@@ -1048,19 +1044,14 @@ class SparkSubmitSuite
 
     val jars = conf.get("spark.yarn.dist.jars").split(",").toSet
 
-    def isSchemeBlacklisted(scheme: String) = {
-      blacklistSchemes.contains("*") || blacklistSchemes.contains(scheme)
-    }
+    // The URI of remote S3 resource should still be remote.
+    assert(jars.contains(tmpS3JarPath))
 
-    if (!isSchemeBlacklisted("s3")) {
-      assert(jars.contains(tmpS3JarPath))
-    }
-
-    if (enableHttpFs && blacklistSchemes.isEmpty) {
+    if (enableHttpFs && !blacklistHttpFs) {
       // If Http FS is supported by yarn service, the URI of remote http resource should
       // still be remote.
       assert(jars.contains(tmpHttpJarPath))
-    } else if (!enableHttpFs || isSchemeBlacklisted("http")) {
+    } else {
       // If Http FS is not supported by yarn service, or http scheme is configured to be force
       // downloading, the URI of remote http resource should be changed to a local one.
       val jarName = new File(tmpHttpJar.toURI).getName

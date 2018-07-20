@@ -50,12 +50,6 @@ class BasicDriverFeatureStepSuite extends SparkFunSuite {
     TEST_IMAGE_PULL_SECRETS.map { secret =>
       new LocalObjectReferenceBuilder().withName(secret).build()
     }
-  private val emptyDriverSpecificConf = KubernetesDriverSpecificConf(
-    None,
-    APP_NAME,
-    MAIN_CLASS,
-    APP_ARGS)
-
 
   test("Check the pod respects all configurations from the user.") {
     val sparkConf = new SparkConf()
@@ -68,7 +62,11 @@ class BasicDriverFeatureStepSuite extends SparkFunSuite {
       .set(IMAGE_PULL_SECRETS, TEST_IMAGE_PULL_SECRETS.mkString(","))
     val kubernetesConf = KubernetesConf(
       sparkConf,
-      emptyDriverSpecificConf,
+      KubernetesDriverSpecificConf(
+        Some(JavaMainAppResource("")),
+        APP_NAME,
+        MAIN_CLASS,
+        APP_ARGS),
       RESOURCE_NAME_PREFIX,
       APP_ID,
       DRIVER_LABELS,
@@ -76,7 +74,6 @@ class BasicDriverFeatureStepSuite extends SparkFunSuite {
       Map.empty,
       Map.empty,
       DRIVER_ENVS,
-      Nil,
       Seq.empty[String])
 
     val featureStep = new BasicDriverFeatureStep(kubernetesConf)
@@ -146,7 +143,6 @@ class BasicDriverFeatureStepSuite extends SparkFunSuite {
       Map.empty,
       Map.empty,
       DRIVER_ENVS,
-      Nil,
       Seq.empty[String])
     val pythonKubernetesConf = KubernetesConf(
       pythonSparkConf,
@@ -162,7 +158,6 @@ class BasicDriverFeatureStepSuite extends SparkFunSuite {
       Map.empty,
       Map.empty,
       DRIVER_ENVS,
-      Nil,
       Seq.empty[String])
     val javaFeatureStep = new BasicDriverFeatureStep(javaKubernetesConf)
     val pythonFeatureStep = new BasicDriverFeatureStep(pythonKubernetesConf)
@@ -181,7 +176,11 @@ class BasicDriverFeatureStepSuite extends SparkFunSuite {
       .set(CONTAINER_IMAGE, "spark-driver:latest")
     val kubernetesConf = KubernetesConf(
       sparkConf,
-      emptyDriverSpecificConf,
+      KubernetesDriverSpecificConf(
+        Some(JavaMainAppResource("")),
+        APP_NAME,
+        MAIN_CLASS,
+        APP_ARGS),
       RESOURCE_NAME_PREFIX,
       APP_ID,
       DRIVER_LABELS,
@@ -189,9 +188,7 @@ class BasicDriverFeatureStepSuite extends SparkFunSuite {
       Map.empty,
       Map.empty,
       DRIVER_ENVS,
-      Nil,
       allFiles)
-
     val step = new BasicDriverFeatureStep(kubernetesConf)
     val additionalProperties = step.getAdditionalPodSystemProperties()
     val expectedSparkConf = Map(
