@@ -36,6 +36,8 @@ import org.apache.spark.launcher.SparkLauncher
 
 object NoDCOS extends Tag("noDcos")
 
+object NoDCOS extends Tag("noDcos")
+
 private[spark] class KubernetesSuite extends SparkFunSuite
   with BeforeAndAfterAll with BeforeAndAfter {
 

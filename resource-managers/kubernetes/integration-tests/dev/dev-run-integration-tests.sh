@@ -118,4 +118,4 @@ then
   properties=( ${properties[@]} -Dtest.include.tags=$INCLUDE_TAGS )
 fi
 
-$TEST_ROOT_DIR/build/mvn integration-test -f $TEST_ROOT_DIR/pom.xml -pl resource-managers/kubernetes/integration-tests -am -Pkubernetes -Phadoop-2.7 ${properties[@]}
+../../../build/mvn integration-test ${properties[@]}
