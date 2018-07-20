@@ -97,12 +97,13 @@ private[spark] case class SparkAppArguments(
     appArgs: Array[String])
 
 private[spark] object SparkAppLauncher extends Logging {
-
   def launch(
       appArguments: SparkAppArguments,
       appConf: SparkAppConf,
       timeoutSecs: Int,
-      sparkHomeDir: Path): Unit = {
+      sparkHomeDir: Path,
+      isJVM: Boolean,
+      pyFiles: Option[String] = None): Unit = {
     val sparkSubmitExecutable = sparkHomeDir.resolve(Paths.get("bin", "spark-submit"))
     logInfo(s"Launching a spark app with arguments $appArguments and conf $appConf")
     val commandLine = (Array(sparkSubmitExecutable.toFile.getAbsolutePath,
