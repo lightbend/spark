@@ -22,35 +22,36 @@ import java.util.UUID
 import java.util.regex.Pattern
 
 import scala.collection.JavaConverters._
+import scala.util.Random
 
 import com.google.common.io.PatternFilenameFilter
-import io.fabric8.kubernetes.api.model.{Container, Pod}
-import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, Tag}
+import io.fabric8.kubernetes.api.model.Pod
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll}
+import org.scalatest.Tag
 import org.scalatest.concurrent.{Eventually, PatienceConfiguration}
 import org.scalatest.time.{Minutes, Seconds, Span}
 
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.deploy.k8s.integrationtest.TestConfig._
 import org.apache.spark.deploy.k8s.integrationtest.backend.{IntegrationTestBackend, IntegrationTestBackendFactory}
+import org.apache.spark.internal.Logging
 
-object NoDCOS extends Tag("NO_DCOS")
+object NoKerberos extends Tag("NoKerberos")
+object DCOS extends Tag("DCOS")
 
-private[spark] class KubernetesSuite extends SparkFunSuite
-  with BeforeAndAfterAll with BeforeAndAfter with BasicTestsSuite with SecretsTestsSuite
-  with PythonTestsSuite {
+private[spark] class LightbendKubernetesSuite extends SparkFunSuite
+  with BeforeAndAfterAll with BeforeAndAfter {
 
-  import KubernetesSuite._
+  import LightbendKubernetesSuite._
 
   private var testBackend: IntegrationTestBackend = _
   private var sparkHomeDir: Path = _
+  private var kubernetesTestComponents: KubernetesTestComponents = _
+  private var sparkAppConf: SparkAppConf = _
   private var image: String = _
-  private var pyImage: String = _
+  private var containerLocalSparkDistroExamplesJar: String = _
+  private var appLocator: String = _
   private var driverPodName: String = _
-
-  protected var kubernetesTestComponents: KubernetesTestComponents = _
-  protected var sparkAppConf: SparkAppConf = _
-  protected var containerLocalSparkDistroExamplesJar: String = _
-  protected var appLocator: String = _
 
   override def beforeAll(): Unit = {
     // The scalatest-maven-plugin gives system properties that are referenced but not set null
@@ -70,7 +71,6 @@ private[spark] class KubernetesSuite extends SparkFunSuite
     val imageTag = getTestImageTag
     val imageRepo = getTestImageRepo
     image = s"$imageRepo/spark:$imageTag"
-    pyImage = s"$imageRepo/spark-py:$imageTag"
 
     val sparkDistroExamplesJarFile: File = sparkHomeDir.resolve(Paths.get("examples", "jars"))
       .toFile
@@ -87,6 +87,10 @@ private[spark] class KubernetesSuite extends SparkFunSuite
   }
 
   before {
+    resetPodProperties()
+  }
+
+  private def resetPodProperties(): Unit = {
     appLocator = UUID.randomUUID().toString.replaceAll("-", "")
     driverPodName = "spark-test-app-" + UUID.randomUUID().toString.replaceAll("-", "")
     sparkAppConf = kubernetesTestComponents.newSparkAppConf()
@@ -94,7 +98,6 @@ private[spark] class KubernetesSuite extends SparkFunSuite
       .set("spark.kubernetes.driver.pod.name", driverPodName)
       .set("spark.kubernetes.driver.label.spark-app-locator", appLocator)
       .set("spark.kubernetes.executor.label.spark-app-locator", appLocator)
-      .set("spark.kubernetes.container.image.pullPolicy", "Always")
     if (!kubernetesTestComponents.hasUserSpecifiedNamespace) {
       kubernetesTestComponents.createNamespace()
     }
@@ -107,79 +110,115 @@ private[spark] class KubernetesSuite extends SparkFunSuite
     deleteDriverPod()
   }
 
-  protected def runSparkPiAndVerifyCompletion(
+  test("Run basic read/write HDFS job (DFSReadWriteTest)", Array(NoKerberos, DCOS): _ *) {
+    runDFSReadWriteTestAndVerifyCompletion()
+  }
+
+  test("Run basic read/write Kafka job (KafkaToHdfsWithCheckpointing)",
+    Array(NoKerberos, DCOS): _ *) {
+    val topic = s"test-topic-${Random.alphanumeric.take(5).mkString}"
+    // Write data to Kafka by submitting a main
+    runProducerTestAndVerifyCompletion(topic = topic)
+    resetPodProperties()
+    // Read from kafka with structured streaming
+    runKafkaWithStructuredStreamingTestAndVerifyCompletion(topic = topic)
+  }
+
+  private def runDFSReadWriteTestAndVerifyCompletion(
       appResource: String = containerLocalSparkDistroExamplesJar,
       driverPodChecker: Pod => Unit = doBasicDriverPodCheck,
       executorPodChecker: Pod => Unit = doBasicExecutorPodCheck,
       appArgs: Array[String] = Array.empty[String],
-      appLocator: String = appLocator,
-      isJVM: Boolean = true ): Unit = {
+      appLocator: String = appLocator): Unit = {
+    sparkAppConf.set("spark.kubernetes.container.image.pullPolicy", "Always")
+
+    // For DC/OS that is: http://api.hdfs.marathon.l4lb.thisdcos.directory/v1/endpoints
+    val hadoopConf = sys.env.get("HADOOP_CONFIG_URL")
+    require(hadoopConf.nonEmpty)
+    hadoopConf
+      .foreach(sparkAppConf.set("spark.kubernetes.driverEnv.HADOOP_CONFIG_URL", _))
+    val args =
+      appArgs ++ Array("/etc/resolv.conf", s"hdfs:///test-${Random.alphanumeric.take(5).mkString}")
     runSparkApplicationAndVerifyCompletion(
       appResource,
-      SPARK_PI_MAIN_CLASS,
-      Seq("Pi is roughly 3"),
-      appArgs,
+      DFS_READ_WRITE_CLASS,
+      Seq("Success! Local Word Count"),
+      args,
       driverPodChecker,
       executorPodChecker,
-      appLocator,
-      isJVM)
+      appLocator)
   }
 
-  protected def runSparkRemoteCheckAndVerifyCompletion(
+  private def runKafkaWithStructuredStreamingTestAndVerifyCompletion(
+      topic: String,
       appResource: String = containerLocalSparkDistroExamplesJar,
       driverPodChecker: Pod => Unit = doBasicDriverPodCheck,
       executorPodChecker: Pod => Unit = doBasicExecutorPodCheck,
-      appArgs: Array[String],
+      appArgs: Array[String] = Array.empty[String],
       appLocator: String = appLocator): Unit = {
+    sparkAppConf.set("spark.kubernetes.container.image.pullPolicy", "Always")
+
+    // For DC/OS that is: broker.kafka.l4lb.thisdcos.directory:9092
+    val kafkaBrokers = sys.env.get("KAFKA_BROKERS")
+    require(kafkaBrokers.nonEmpty)
+    val jars = System.getProperty("spark.kubernetes.test.extraJars")
+    require(jars != null)
+    val args = Array(
+      "--topic", topic,
+      "--bootstrapServers", kafkaBrokers.get,
+      "--checkpointDirectory", s"hdfs:///checkpoint-${Random.alphanumeric.take(5).mkString}"
+    )
+    // expected string:
+    // +--------+
+    // |count(1)|
+    // +--------+
+    // |     100|
+    // +--------+
+
     runSparkApplicationAndVerifyCompletion(
       appResource,
-      SPARK_REMOTE_MAIN_CLASS,
-      Seq(s"Mounting of ${appArgs.head} was true"),
-      appArgs,
+      KAFKA_STRUCTURED_STREAMING_CONSOLE,
+      Seq("|count(1)|", "|     100|"),
+      args,
       driverPodChecker,
       executorPodChecker,
       appLocator,
-      true)
+      Some(jars))
   }
 
-  protected def runSparkJVMCheckAndVerifyCompletion(
+  private def runProducerTestAndVerifyCompletion(
+      topic: String,
       appResource: String = containerLocalSparkDistroExamplesJar,
-      mainClass: String = SPARK_DRIVER_MAIN_CLASS,
       driverPodChecker: Pod => Unit = doBasicDriverPodCheck,
-      appArgs: Array[String] = Array("5"),
-      expectedJVMValue: Seq[String]): Unit = {
-    val appArguments = SparkAppArguments(
-      mainAppResource = appResource,
-      mainClass = mainClass,
-      appArgs = appArgs)
-    SparkAppLauncher.launch(
-      appArguments,
-      sparkAppConf,
-      TIMEOUT.value.toSeconds.toInt,
-      sparkHomeDir,
-      true)
+      executorPodChecker: Pod => Unit = doBasicExecutorPodCheck,
+      appArgs: Array[String] = Array.empty[String],
+      appLocator: String = appLocator): Unit = {
+    sparkAppConf.set("spark.kubernetes.container.image.pullPolicy", "Always")
 
-    val driverPod = kubernetesTestComponents.kubernetesClient
-      .pods()
-      .withLabel("spark-app-locator", appLocator)
-      .withLabel("spark-role", "driver")
-      .list()
-      .getItems
-      .get(0)
-    doBasicDriverPodCheck(driverPod)
+    // For DC/OS that is: broker.kafka.l4lb.thisdcos.directory:9092
+    val kafkaBrokers = sys.env.get("KAFKA_BROKERS")
+    require(kafkaBrokers.nonEmpty)
+    val jars = System.getProperty("spark.kubernetes.test.extraJars")
+    require(jars != null)
 
-    Eventually.eventually(TIMEOUT, INTERVAL) {
-      expectedJVMValue.foreach { e =>
-        assert(kubernetesTestComponents.kubernetesClient
-          .pods()
-          .withName(driverPod.getMetadata.getName)
-          .getLog
-          .contains(e), "The application did not complete.")
-      }
-    }
+    val args = Array(
+      "--topic", topic,
+      "--bootstrapServers", kafkaBrokers.get,
+      "--step", "1",
+      "--maxRecords", "100"
+    )
+    runSparkApplicationAndVerifyCompletion(
+      appResource,
+      KAFKA_SIMPLE_PRODUCER_CLASS,
+      Seq("Success!"),
+      args,
+      driverPodChecker,
+      executorPodChecker,
+      appLocator,
+      Some(jars))
   }
 
-  protected def runSparkApplicationAndVerifyCompletion(
+  private def runSparkApplicationAndVerifyCompletion(
       appResource: String,
       mainClass: String,
       expectedLogOnCompletion: Seq[String],
@@ -187,20 +226,14 @@ private[spark] class KubernetesSuite extends SparkFunSuite
       driverPodChecker: Pod => Unit,
       executorPodChecker: Pod => Unit,
       appLocator: String,
-      isJVM: Boolean,
-      pyFiles: Option[String] = None): Unit = {
+      extraJars: Option[String] = None): Unit = {
     val appArguments = SparkAppArguments(
       mainAppResource = appResource,
       mainClass = mainClass,
       appArgs = appArgs)
-    SparkAppLauncher.launch(
-      appArguments,
-      sparkAppConf,
-      TIMEOUT.value.toSeconds.toInt,
-      sparkHomeDir,
-      isJVM,
-      pyFiles)
 
+    CustomSparkAppLauncher.
+      launch(appArguments, sparkAppConf, TIMEOUT.value.toSeconds.toInt, sparkHomeDir, extraJars)
     val driverPod = kubernetesTestComponents.kubernetesClient
       .pods()
       .withLabel("spark-app-locator", appLocator)
@@ -231,45 +264,15 @@ private[spark] class KubernetesSuite extends SparkFunSuite
     }
   }
 
-  protected def doBasicDriverPodCheck(driverPod: Pod): Unit = {
+  private def doBasicDriverPodCheck(driverPod: Pod): Unit = {
     assert(driverPod.getMetadata.getName === driverPodName)
     assert(driverPod.getSpec.getContainers.get(0).getImage === image)
     assert(driverPod.getSpec.getContainers.get(0).getName === "spark-kubernetes-driver")
   }
 
-
-  protected def doBasicDriverPyPodCheck(driverPod: Pod): Unit = {
-    assert(driverPod.getMetadata.getName === driverPodName)
-    assert(driverPod.getSpec.getContainers.get(0).getImage === pyImage)
-    assert(driverPod.getSpec.getContainers.get(0).getName === "spark-kubernetes-driver")
-  }
-
-  protected def doBasicExecutorPodCheck(executorPod: Pod): Unit = {
+  private def doBasicExecutorPodCheck(executorPod: Pod): Unit = {
     assert(executorPod.getSpec.getContainers.get(0).getImage === image)
     assert(executorPod.getSpec.getContainers.get(0).getName === "executor")
-  }
-
-  protected def doBasicExecutorPyPodCheck(executorPod: Pod): Unit = {
-    assert(executorPod.getSpec.getContainers.get(0).getImage === pyImage)
-    assert(executorPod.getSpec.getContainers.get(0).getName === "executor")
-  }
-
-  protected def checkCustomSettings(pod: Pod): Unit = {
-    assert(pod.getMetadata.getLabels.get("label1") === "label1-value")
-    assert(pod.getMetadata.getLabels.get("label2") === "label2-value")
-    assert(pod.getMetadata.getAnnotations.get("annotation1") === "annotation1-value")
-    assert(pod.getMetadata.getAnnotations.get("annotation2") === "annotation2-value")
-
-    val container = pod.getSpec.getContainers.get(0)
-    val envVars = container
-      .getEnv
-      .asScala
-      .map { env =>
-        (env.getName, env.getValue)
-      }
-      .toMap
-    assert(envVars("ENV1") === "VALUE1")
-    assert(envVars("ENV2") === "VALUE2")
   }
 
   private def deleteDriverPod(): Unit = {
@@ -283,11 +286,45 @@ private[spark] class KubernetesSuite extends SparkFunSuite
   }
 }
 
-private[spark] object KubernetesSuite {
-  val k8sTestTag = Tag("k8s")
-  val SPARK_PI_MAIN_CLASS: String = "org.apache.spark.examples.SparkPi"
-  val SPARK_REMOTE_MAIN_CLASS: String = "org.apache.spark.examples.SparkRemoteFileTest"
-  val SPARK_DRIVER_MAIN_CLASS: String = "org.apache.spark.examples.DriverSubmissionTest"
+private[spark] object LightbendKubernetesSuite {
   val TIMEOUT = PatienceConfiguration.Timeout(Span(2, Minutes))
   val INTERVAL = PatienceConfiguration.Interval(Span(2, Seconds))
+  val DFS_READ_WRITE_CLASS: String = "org.apache.spark.examples.DFSReadWriteTest"
+  val KAFKA_SIMPLE_PRODUCER_CLASS: String =
+    "com.lightbend.fdp.spark.k8s.test.KafkaSimpleProducer"
+  val KAFKA_STRUCTURED_STREAMING_CONSOLE =
+    "com.lightbend.fdp.spark.k8s.test.KafkaToHdfsWithCheckpointing"
 }
+
+private[spark] object CustomSparkAppLauncher extends Logging {
+
+  def launch(
+      appArguments: SparkAppArguments,
+      appConf: SparkAppConf,
+      timeoutSecs: Int,
+      sparkHomeDir: Path,
+      extraJars: Option[String] = None): Unit = {
+    val sparkSubmitExecutable = sparkHomeDir.resolve(Paths.get("bin", "spark-submit"))
+    logInfo(s"Launching a spark app with arguments $appArguments and conf $appConf")
+
+    val jars = {
+      extraJars match {
+      case Some(value) => Array("--jars", value)
+      case None => Array[String]()
+      }
+    }
+    val commandLine = (Array(sparkSubmitExecutable.toFile.getAbsolutePath,
+      "--deploy-mode", "cluster",
+      "--class", appArguments.mainClass,
+      "--master", appConf.get("spark.master")
+    ) ++ jars ++ appConf.toStringArray :+
+      appArguments.mainAppResource) ++
+      appArguments.appArgs
+    val output = ProcessUtils.executeProcess(commandLine, timeoutSecs)
+    // scalastyle:off println
+    // output.foreach(println(_))
+    // scalastyle:on println
+  }
+}
+
+

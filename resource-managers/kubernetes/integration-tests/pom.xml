@@ -131,6 +131,7 @@
           <systemProperties>
             <log4j.configuration>file:src/test/resources/log4j.properties</log4j.configuration>
             <java.awt.headless>true</java.awt.headless>
+            <spark.kubernetes.test.extraJars>${spark.kubernetes.test.extraJars}</spark.kubernetes.test.extraJars>
             <spark.kubernetes.test.imageTagFile>${spark.kubernetes.test.imageTagFile}</spark.kubernetes.test.imageTagFile>
             <spark.kubernetes.test.unpackSparkDir>${spark.kubernetes.test.unpackSparkDir}</spark.kubernetes.test.unpackSparkDir>
             <spark.kubernetes.test.imageRepo>${spark.kubernetes.test.imageRepo}</spark.kubernetes.test.imageRepo>

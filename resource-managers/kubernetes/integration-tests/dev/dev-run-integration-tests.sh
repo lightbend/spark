@@ -27,6 +27,7 @@ SPARK_MASTER=
 NAMESPACE=
 SERVICE_ACCOUNT=
 INCLUDE_TAGS="k8s"
+EXTRA_JARS=
 EXCLUDE_TAGS=
 
 # Parse arguments
@@ -64,6 +65,10 @@ while (( "$#" )); do
       INCLUDE_TAGS="k8s,$2"
       shift
       ;;
+    --extra-jars)
+      EXTRA_JARS="$2"
+      shift
+      ;;
     --exclude-tags)
       EXCLUDE_TAGS="$2"
       shift
@@ -96,6 +101,11 @@ fi
 if [ -n $SPARK_MASTER ];
 then
   properties=( ${properties[@]} -Dspark.kubernetes.test.master=$SPARK_MASTER )
+fi
+
+if [ -n $EXTRA_JARS ];
+then
+  properties=( ${properties[@]} -Dspark.kubernetes.test.extraJars=$EXTRA_JARS )
 fi
 
 if [ -n $EXCLUDE_TAGS ];
