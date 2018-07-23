@@ -103,11 +103,15 @@ private[spark] class LightbendKubernetesSuite extends SparkFunSuite
     }
   }
 
-  after {
+  private def cleanup() = {
     if (!kubernetesTestComponents.hasUserSpecifiedNamespace) {
       kubernetesTestComponents.deleteNamespace()
     }
     deleteDriverPod()
+  }
+
+  after {
+    cleanup()
   }
 
   test("Run basic read/write HDFS job (DFSReadWriteTest)", Array(NoKerberos, DCOS): _ *) {
@@ -119,6 +123,7 @@ private[spark] class LightbendKubernetesSuite extends SparkFunSuite
     val topic = s"test-topic-${Random.alphanumeric.take(5).mkString}"
     // Write data to Kafka by submitting a main
     runProducerTestAndVerifyCompletion(topic = topic)
+    cleanup()
     resetPodProperties()
     // Read from kafka with structured streaming
     runKafkaWithStructuredStreamingTestAndVerifyCompletion(topic = topic)
