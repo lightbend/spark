@@ -123,7 +123,7 @@ abstract class TaskContext extends Serializable {
    *
    * Exceptions thrown by the listener will result in failure of the task.
    */
-  def addTaskCompletionListener(f: (TaskContext) => Unit): TaskContext = {
+  def addTaskCompletionListener[U](f: (TaskContext) => U): TaskContext = {
     addTaskCompletionListener(new TaskCompletionListener {
       override def onTaskCompletion(context: TaskContext): Unit = f(context)
     })
