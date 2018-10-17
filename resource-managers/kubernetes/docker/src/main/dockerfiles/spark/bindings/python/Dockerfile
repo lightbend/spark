@@ -35,5 +35,11 @@ RUN apk add --no-cache python && \
 COPY python/lib ${SPARK_HOME}/python/lib
 ENV PYTHONPATH ${SPARK_HOME}/python/lib/pyspark.zip:${SPARK_HOME}/python/lib/py4j-*.zip
 
+RUN chgrp -R 0 /opt/spark  && \
+    chmod -R g=u /opt/spark
+
+RUN chmod -R u+x /opt/spark/bin && \
+    chmod -R u+x /opt/spark/sbin
+
 WORKDIR /opt/spark/work-dir
 ENTRYPOINT [ "/opt/entrypoint.sh" ]

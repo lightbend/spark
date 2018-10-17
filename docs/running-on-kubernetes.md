@@ -657,6 +657,13 @@ specific to Spark on Kubernetes.
   </td>
 </tr>
 <tr>
+  <td><code>spark.kubernetes.executor.deleteOnTermination</code></td>
+  <td>true</td>
+  <td>
+  Specify whether executor pods should be deleted in case of failure or normal termination.
+  </td>
+</tr>
+<tr>
   <td><code>spark.kubernetes.report.interval</code></td>
   <td><code>1s</code></td>
   <td>

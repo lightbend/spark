@@ -40,7 +40,8 @@ private[spark] trait BasicTestsSuite { k8sSuite: KubernetesSuite =>
       appResource = SparkLauncher.NO_RESOURCE)
   }
 
-  test("Run SparkPi with a master URL without a scheme.", k8sTestTag) {
+  test("Run SparkPi with a master URL without a scheme.",
+    Array(k8sTestTag, NoDCOS): _*) {
     val url = kubernetesTestComponents.kubernetesClient.getMasterUrl
     val k8sMasterUrl = if (url.getPort < 0) {
       s"k8s://${url.getHost}"

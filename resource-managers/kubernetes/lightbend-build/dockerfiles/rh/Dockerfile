@@ -15,11 +15,10 @@
 # limitations under the License.
 #
 
-FROM openjdk:8-alpine
+FROM registry.access.redhat.com/redhat-openjdk-18/openjdk18-openshift:1.5-14.1539812388
 
 ARG spark_jars=jars
 ARG img_path=kubernetes/dockerfiles
-ARG k8s_tests=kubernetes/tests
 
 # Before building the docker image, first build and make a Spark distribution following
 # the instructions in http://spark.apache.org/docs/latest/building-spark.html.
@@ -28,23 +27,14 @@ ARG k8s_tests=kubernetes/tests
 # of the Spark distribution. E.g.:
 # docker build -t spark:latest -f kubernetes/dockerfiles/spark/Dockerfile .
 
+USER root
+
 RUN set -ex && \
-    apk upgrade --no-cache && \
-    apk add --no-cache bash tini libc6-compat linux-pam && \
     mkdir -p /opt/spark && \
     mkdir -p /opt/spark/work-dir && \
     touch /opt/spark/RELEASE && \
-    rm /bin/sh && \
-    ln -sv /bin/bash /bin/sh && \
     echo "auth required pam_wheel.so use_uid" >> /etc/pam.d/su && \
     chgrp root /etc/passwd && chmod ug+rw /etc/passwd
-
-RUN mkdir -p /etc/metrics/conf
-RUN mkdir -p /prometheus
-
-ADD https://s3-us-west-2.amazonaws.com/fdp-kubernetes-builds/spark/extra/metrics.properties  /etc/metrics/conf/
-ADD http://central.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.3.1/jmx_prometheus_javaagent-0.3.1.jar /prometheus/
-ADD https://s3-us-west-2.amazonaws.com/fdp-kubernetes-builds/spark/extra/spark-prom-exporter.yml  /etc/metrics/conf/prometheus.yaml
 
 COPY ${spark_jars} /opt/spark/jars
 COPY bin /opt/spark/bin
@@ -54,11 +44,31 @@ COPY examples /opt/spark/examples
 COPY ${k8s_tests} /opt/spark/tests
 COPY data /opt/spark/data
 
+RUN mkdir -p /etc/metrics/conf
+RUN mkdir -p /prometheus
+
+ADD https://s3-us-west-2.amazonaws.com/fdp-kubernetes-builds/spark/extra/metrics.properties  /etc/metrics/conf/
+ADD http://central.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.3.1/jmx_prometheus_javaagent-0.3.1.jar /prometheus/
+ADD https://s3-us-west-2.amazonaws.com/fdp-kubernetes-builds/spark/extra/spark-prom-exporter.yml /etc/metrics/conf/prometheus.yaml
+
+RUN chgrp -R 0 /prometheus  && \
+    chmod -R g=u /prometheus
+
+RUN chgrp -R 0 /etc/metrics/conf  && \
+    chmod -R g=u /etc/metrics/conf
+
 RUN chgrp -R 0 /opt/spark  && \
     chmod -R g=u /opt/spark
 
 RUN chmod -R u+x /opt/spark/bin && \
     chmod -R u+x /opt/spark/sbin
+
+# Add Tini
+ENV TINI_VERSION v0.18.0
+ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /sbin/tini
+RUN chmod +x /sbin/tini
+
+USER 185
 
 ENV SPARK_HOME /opt/spark
 

@@ -21,11 +21,11 @@ import org.apache.spark.deploy.k8s.integrationtest.TestConfig.{getTestImageRepo,
 private[spark] trait PythonTestsSuite { k8sSuite: KubernetesSuite =>
 
   import PythonTestsSuite._
-  import KubernetesSuite.k8sTestTag
+  import KubernetesSuite.{k8sTestTag, nonJavaTestTag}
 
   private val pySparkDockerImage =
     s"${getTestImageRepo}/spark-py:${getTestImageTag}"
-  test("Run PySpark on simple pi.py example", k8sTestTag) {
+  test("Run PySpark on simple pi.py example", k8sTestTag, nonJavaTestTag) {
     sparkAppConf
       .set("spark.kubernetes.container.image", pySparkDockerImage)
     runSparkApplicationAndVerifyCompletion(
@@ -39,7 +39,7 @@ private[spark] trait PythonTestsSuite { k8sSuite: KubernetesSuite =>
       isJVM = false)
   }
 
-  test("Run PySpark with Python2 to test a pyfiles example", k8sTestTag) {
+  test("Run PySpark with Python2 to test a pyfiles example", k8sTestTag, nonJavaTestTag) {
     sparkAppConf
       .set("spark.kubernetes.container.image", pySparkDockerImage)
       .set("spark.kubernetes.pyspark.pythonVersion", "2")
@@ -57,7 +57,7 @@ private[spark] trait PythonTestsSuite { k8sSuite: KubernetesSuite =>
       pyFiles = Some(PYSPARK_CONTAINER_TESTS))
   }
 
-  test("Run PySpark with Python3 to test a pyfiles example", k8sTestTag) {
+  test("Run PySpark with Python3 to test a pyfiles example", k8sTestTag, nonJavaTestTag) {
     sparkAppConf
       .set("spark.kubernetes.container.image", pySparkDockerImage)
       .set("spark.kubernetes.pyspark.pythonVersion", "3")
@@ -75,7 +75,7 @@ private[spark] trait PythonTestsSuite { k8sSuite: KubernetesSuite =>
       pyFiles = Some(PYSPARK_CONTAINER_TESTS))
   }
 
-  test("Run PySpark with memory customization", k8sTestTag) {
+  test("Run PySpark with memory customization", k8sTestTag, nonJavaTestTag) {
     sparkAppConf
       .set("spark.kubernetes.container.image", pySparkDockerImage)
       .set("spark.kubernetes.pyspark.pythonVersion", "3")

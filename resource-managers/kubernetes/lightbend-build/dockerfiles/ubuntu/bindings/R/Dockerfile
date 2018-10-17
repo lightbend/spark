@@ -20,16 +20,13 @@ FROM $base_img
 WORKDIR /
 RUN mkdir ${SPARK_HOME}/R
 
-RUN apk add --no-cache R R-dev
+RUN echo "deb http://cran.rstudio.com/bin/linux/ubuntu xenial/" | tee -a /etc/apt/sources.list && \
+    gpg --keyserver keyserver.ubuntu.com --recv-key E084DAB9 && \
+    gpg -a --export E084DAB9 | apt-key add - && \
+    apt-get update && apt-get install -y r-base r-base-dev
 
 COPY R ${SPARK_HOME}/R
 ENV R_HOME /usr/lib/R
-
-RUN chgrp -R 0 /opt/spark  && \
-    chmod -R g=u /opt/spark
-
-RUN chmod -R u+x /opt/spark/bin && \
-    chmod -R u+x /opt/spark/sbin
 
 WORKDIR /opt/spark/work-dir
 ENTRYPOINT [ "/opt/entrypoint.sh" ]

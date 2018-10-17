@@ -27,8 +27,14 @@ SPARK_MASTER=
 NAMESPACE=
 SERVICE_ACCOUNT=
 INCLUDE_TAGS="k8s"
+EXTRA_JARS=
 EXCLUDE_TAGS=
-SCALA_VERSION="$($TEST_ROOT_DIR/build/mvn org.apache.maven.plugins:maven-help-plugin:2.1.1:evaluate -Dexpression=scala.binary.version | grep -v '\[' )"
+MVN="$TEST_ROOT_DIR/build/mvn"
+
+SCALA_VERSION=$("$MVN" help:evaluate -Dexpression=scala.binary.version 2>/dev/null\
+    | grep -v "INFO"\
+    | grep -v "WARNING"\
+    | tail -n 1)
 
 # Parse arguments
 while (( "$#" )); do
@@ -69,6 +75,10 @@ while (( "$#" )); do
       EXCLUDE_TAGS="$2"
       shift
       ;;
+    --extra-jars)
+      EXTRA_JARS="$2"
+      shift
+      ;;
     *)
       break
       ;;
@@ -104,4 +114,9 @@ then
   properties=( ${properties[@]} -Dtest.exclude.tags=$EXCLUDE_TAGS )
 fi
 
-$TEST_ROOT_DIR/build/mvn integration-test -f $TEST_ROOT_DIR/pom.xml -pl resource-managers/kubernetes/integration-tests -am -Pscala-$SCALA_VERSION -Pkubernetes -Pkubernetes-integration-tests -Phadoop-2.7 ${properties[@]}
+if [ -n $EXTRA_JARS ];
+then
+  properties=( ${properties[@]} -Dspark.kubernetes.test.extraJars=$EXTRA_JARS )
+fi
+
+$TEST_ROOT_DIR/build/mvn integration-test -f $TEST_ROOT_DIR/pom.xml -pl resource-managers/kubernetes/integration-tests -am -Pscala-$SCALA_VERSION -Pkubernetes -Pkubernetes-integration-tests ${properties[@]}
