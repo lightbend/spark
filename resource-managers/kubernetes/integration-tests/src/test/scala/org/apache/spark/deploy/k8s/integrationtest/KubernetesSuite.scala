@@ -40,7 +40,7 @@ object NoDCOS extends Tag("NO_DCOS")
 
 private[spark] class KubernetesSuite extends SparkFunSuite
   with BeforeAndAfterAll with BeforeAndAfter with BasicTestsSuite with SecretsTestsSuite
-  with PythonTestsSuite with ClientModeTestsSuite
+  with PythonTestsSuite with ClientModeTestsSuite with RTestsSuite
   with Logging with Eventually with Matchers {
 
   import KubernetesSuite._

@@ -20,6 +20,11 @@ FROM $base_img
 WORKDIR /
 RUN mkdir ${SPARK_HOME}/python
 COPY python/lib ${SPARK_HOME}/python/lib
+
+FROM $base_img
+
+COPY --from=0 /opt /opt
+
 # TODO: Investigate running both pip and pip3 via virtualenvs
 RUN apt-get -y install python && \
     apt-get -y install python3 && \

@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-FROM lightbend/custom-ubuntu-openjdk8:16.04
+FROM lightbend/custom-ubuntu-openjdk8:18.04
 
 ARG spark_jars=jars
 ARG img_path=kubernetes/dockerfiles
@@ -27,18 +27,6 @@ ARG img_path=kubernetes/dockerfiles
 # of the Spark distribution. E.g.:
 # docker build -t spark:latest -f kubernetes/dockerfiles/spark/Dockerfile .
 
-RUN set -ex && \
-    apt-get -y update && \
-    apt-get -y upgrade && \
-    apt-get -y install bash libc6 && \
-    apt-get -y install curl wget && \
-    mkdir -p /opt/spark && \
-    mkdir -p /opt/spark/work-dir && \
-    touch /opt/spark/RELEASE && \
-    rm /bin/sh && \
-    ln -sv /bin/bash /bin/sh && \
-    chgrp root /etc/passwd && chmod ug+rw /etc/passwd
-
 COPY ${spark_jars} /opt/spark/jars
 COPY bin /opt/spark/bin
 COPY sbin /opt/spark/sbin
@@ -47,26 +35,35 @@ COPY examples /opt/spark/examples
 COPY kubernetes/tests /opt/spark/tests
 COPY data /opt/spark/data
 
-RUN mkdir -p /etc/metrics/conf
-RUN mkdir -p /prometheus
-
-ADD https://s3-us-west-2.amazonaws.com/fdp-kubernetes-builds/spark/extra/metrics.properties  /etc/metrics/conf/
-ADD http://central.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.3.1/jmx_prometheus_javaagent-0.3.1.jar /prometheus/
-ADD https://s3-us-west-2.amazonaws.com/fdp-kubernetes-builds/spark/extra/spark-prom-exporter.yml  /etc/metrics/conf/prometheus.yaml
-
-RUN chgrp -R 0 /etc/metrics/conf  && \
-    chmod -R g=u /etc/metrics/conf
-
-RUN chgrp -R 0 /opt/spark  && \
-    chmod -R g=u /opt/spark
-
-RUN chmod -R u+x /opt/spark/bin && \
+RUN mkdir -p /opt/spark/work-dir && \
+    touch /opt/spark/RELEASE && \
+    chgrp -R 0 /opt/spark  && \
+    chmod -R g=u /opt/spark && \
+    chmod -R u+x /opt/spark/bin && \
     chmod -R u+x /opt/spark/sbin
 
-# Add Tini
-ENV TINI_VERSION v0.18.0
-ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /sbin/tini
-RUN chmod +x /sbin/tini
+FROM lightbend/custom-ubuntu-openjdk8:18.04
+COPY --from=0 /opt /opt
+
+RUN set -ex && \
+    apt-get -y update && \
+    apt-get -y upgrade && \
+    apt-get -y install bash libc6 && \
+    apt-get -y install curl wget && \
+    rm /bin/sh && \
+    ln -sv /bin/bash /bin/sh && \
+    chgrp root /etc/passwd && chmod ug+rw /etc/passwd && \
+    mkdir -p /etc/metrics/conf && \
+    mkdir -p /prometheus && \
+    curl https://s3-us-west-2.amazonaws.com/fdp-kubernetes-builds/spark/extra/metrics.properties -o /etc/metrics/conf/metrics.properties && \
+    curl  http://central.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.3.1/jmx_prometheus_javaagent-0.3.1.jar -o /prometheus/jmx_prometheus_javaagent-0.3.1.jar && \
+    curl https://s3-us-west-2.amazonaws.com/fdp-kubernetes-builds/spark/extra/spark-prom-exporter.yml -o /etc/metrics/conf/prometheus.yaml && \
+    chgrp -R 0 /prometheus  && \
+    chmod -R g=u /prometheus && \
+    chgrp -R 0 /etc/metrics/conf  && \
+    chmod -R g=u /etc/metrics/conf && \
+    curl -L https://github.com/krallin/tini/releases/download/v0.18.0/tini -o /sbin/tini && \
+    chmod +x /sbin/tini
 
 ENV SPARK_HOME /opt/spark
 
