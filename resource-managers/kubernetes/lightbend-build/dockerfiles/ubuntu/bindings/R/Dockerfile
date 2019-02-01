@@ -19,14 +19,16 @@ ARG base_img
 FROM $base_img
 WORKDIR /
 RUN mkdir ${SPARK_HOME}/R
-
-RUN echo "deb http://cran.rstudio.com/bin/linux/ubuntu xenial/" | tee -a /etc/apt/sources.list && \
-    gpg --keyserver keyserver.ubuntu.com --recv-key E084DAB9 && \
-    gpg -a --export E084DAB9 | apt-key add - && \
-    apt-get update && apt-get install -y r-base r-base-dev
-
 COPY R ${SPARK_HOME}/R
-ENV R_HOME /usr/lib/R
+
+FROM $base_img
+COPY --from=0 /opt /opt
+
+RUN export DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true && \ 
+    apt-get update && apt-get install -y gnupg2 && \
+    echo "deb https://cloud.r-project.org/bin/linux/ubuntu bionic-cran35/" | tee -a /etc/apt/sources.list && \
+    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys E298A3A825C0D65DFD57CBB651716619E084DAB9 && \
+    apt-get update && apt-get install -y r-base r-base-dev
 
 WORKDIR /opt/spark/work-dir
 ENTRYPOINT [ "/opt/entrypoint.sh" ]
