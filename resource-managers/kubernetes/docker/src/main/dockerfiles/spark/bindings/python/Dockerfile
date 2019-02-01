@@ -19,6 +19,18 @@ ARG base_img
 FROM $base_img
 WORKDIR /
 RUN mkdir ${SPARK_HOME}/python
+
+COPY python/lib ${SPARK_HOME}/python/lib
+
+RUN chgrp -R 0 /opt/spark  && \
+    chmod -R g=u /opt/spark && \
+    chmod -R u+x /opt/spark/bin && \
+    chmod -R u+x /opt/spark/sbin
+
+FROM $base_img
+
+COPY --from=0 /opt /opt
+
 # TODO: Investigate running both pip and pip3 via virtualenvs
 RUN apk add --no-cache python && \
     apk add --no-cache python3 && \
@@ -32,14 +44,8 @@ RUN apk add --no-cache python && \
     # Removed the .cache to save space
     rm -r /root/.cache
 
-COPY python/lib ${SPARK_HOME}/python/lib
 ENV PYTHONPATH ${SPARK_HOME}/python/lib/pyspark.zip:${SPARK_HOME}/python/lib/py4j-*.zip
 
-RUN chgrp -R 0 /opt/spark  && \
-    chmod -R g=u /opt/spark
-
-RUN chmod -R u+x /opt/spark/bin && \
-    chmod -R u+x /opt/spark/sbin
-
 WORKDIR /opt/spark/work-dir
+
 ENTRYPOINT [ "/opt/entrypoint.sh" ]

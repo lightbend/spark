@@ -29,44 +29,44 @@ ARG img_path=kubernetes/dockerfiles
 
 USER root
 
-RUN set -ex && \
-    mkdir -p /opt/spark && \
-    mkdir -p /opt/spark/work-dir && \
-    touch /opt/spark/RELEASE && \
-    echo "auth required pam_wheel.so use_uid" >> /etc/pam.d/su && \
-    chgrp root /etc/passwd && chmod ug+rw /etc/passwd
-
 COPY ${spark_jars} /opt/spark/jars
 COPY bin /opt/spark/bin
 COPY sbin /opt/spark/sbin
 COPY ${img_path}/spark/entrypoint.sh /opt/
 COPY examples /opt/spark/examples
-COPY ${k8s_tests} /opt/spark/tests
+#COPY ${k8s_tests} /opt/spark/tests
 COPY data /opt/spark/data
 
-RUN mkdir -p /etc/metrics/conf
-RUN mkdir -p /prometheus
-
-ADD https://s3-us-west-2.amazonaws.com/fdp-kubernetes-builds/spark/extra/metrics.properties  /etc/metrics/conf/
-ADD http://central.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.3.1/jmx_prometheus_javaagent-0.3.1.jar /prometheus/
-ADD https://s3-us-west-2.amazonaws.com/fdp-kubernetes-builds/spark/extra/spark-prom-exporter.yml /etc/metrics/conf/prometheus.yaml
-
-RUN chgrp -R 0 /prometheus  && \
-    chmod -R g=u /prometheus
-
-RUN chgrp -R 0 /etc/metrics/conf  && \
-    chmod -R g=u /etc/metrics/conf
-
-RUN chgrp -R 0 /opt/spark  && \
-    chmod -R g=u /opt/spark
-
-RUN chmod -R u+x /opt/spark/bin && \
+RUN mkdir -p /opt/spark/work-dir && \
+    touch /opt/spark/RELEASE && \
+    chgrp -R 0 /opt/spark  && \
+    chmod -R g=u /opt/spark && \
+    chmod -R u+x /opt/spark/bin && \
     chmod -R u+x /opt/spark/sbin
 
-# Add Tini
-ENV TINI_VERSION v0.18.0
-ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /sbin/tini
-RUN chmod +x /sbin/tini
+FROM registry.access.redhat.com/redhat-openjdk-18/openjdk18-openshift:1.5-14.1539812388
+
+USER root
+COPY --from=0 /opt /opt
+
+RUN set -ex && \
+    echo "auth required pam_wheel.so use_uid" >> /etc/pam.d/su && \
+    chgrp root /etc/passwd && chmod ug+rw /etc/passwd  && \
+    mkdir -p /etc/metrics/conf && \
+    mkdir -p /prometheus && \
+    curl https://s3-us-west-2.amazonaws.com/fdp-kubernetes-builds/spark/extra/metrics.properties -o /etc/metrics/conf/metrics.properties && \
+    curl  http://central.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.3.1/jmx_prometheus_javaagent-0.3.1.jar -o /prometheus/jmx_prometheus_javaagent-0.3.1.jar && \
+    curl https://s3-us-west-2.amazonaws.com/fdp-kubernetes-builds/spark/extra/spark-prom-exporter.yml -o /etc/metrics/conf/prometheus.yaml && \
+    chgrp -R 0 /prometheus  && \
+    chmod -R g=u /prometheus && \
+    chgrp -R 0 /etc/metrics/conf  && \
+    chmod -R g=u /etc/metrics/conf && \
+    #chgrp -R 0 /opt/spark  && \
+    #chmod -R g=u /opt/spark && \
+    #chmod -R u+x /opt/spark/bin && \
+    #chmod -R u+x /opt/spark/sbin && \
+    curl -L https://github.com/krallin/tini/releases/download/v0.18.0/tini -o /sbin/tini && \
+    chmod +x /sbin/tini
 
 USER 185
 
