@@ -18,24 +18,17 @@
 ARG base_img
 FROM $base_img
 WORKDIR /
-
 RUN mkdir ${SPARK_HOME}/R
-
 COPY R ${SPARK_HOME}/R
 
-RUN chgrp -R 0 /opt/spark  && \
-    chmod -R g=u /opt/spark && \
-    chmod -R u+x /opt/spark/bin && \
-    chmod -R u+x /opt/spark/sbin
-
 FROM $base_img
-
 COPY --from=0 /opt /opt
 
-RUN apk add --no-cache R R-dev
-
-ENV R_HOME /usr/lib/R
+RUN export DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true && \ 
+    apt-get update && apt-get install -y gnupg2 && \
+    echo "deb https://cloud.r-project.org/bin/linux/ubuntu bionic-cran35/" | tee -a /etc/apt/sources.list && \
+    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys E298A3A825C0D65DFD57CBB651716619E084DAB9 && \
+    apt-get update && apt-get install -y r-base r-base-dev
 
 WORKDIR /opt/spark/work-dir
-
 ENTRYPOINT [ "/opt/entrypoint.sh" ]

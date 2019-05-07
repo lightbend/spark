@@ -18,24 +18,24 @@
 ARG base_img
 FROM $base_img
 WORKDIR /
-
-RUN mkdir ${SPARK_HOME}/R
-
-COPY R ${SPARK_HOME}/R
-
-RUN chgrp -R 0 /opt/spark  && \
-    chmod -R g=u /opt/spark && \
-    chmod -R u+x /opt/spark/bin && \
-    chmod -R u+x /opt/spark/sbin
+RUN mkdir ${SPARK_HOME}/python
+COPY python/lib ${SPARK_HOME}/python/lib
 
 FROM $base_img
 
 COPY --from=0 /opt /opt
 
-RUN apk add --no-cache R R-dev
+# TODO: Investigate running both pip and pip3 via virtualenvs
+RUN apt-get -y install python && \
+    apt-get -y install python3 && \
+    apt-get -y install python-pip && \
+    apt-get -y install python3-pip && \
+    pip install --upgrade pip setuptools && \
+    # You may install with python3 packages by using pip3.6
+    # Removed the .cache to save space
+    rm -r /root/.cache
 
-ENV R_HOME /usr/lib/R
+ENV PYTHONPATH ${SPARK_HOME}/python/lib/pyspark.zip:${SPARK_HOME}/python/lib/py4j-*.zip
 
 WORKDIR /opt/spark/work-dir
-
 ENTRYPOINT [ "/opt/entrypoint.sh" ]

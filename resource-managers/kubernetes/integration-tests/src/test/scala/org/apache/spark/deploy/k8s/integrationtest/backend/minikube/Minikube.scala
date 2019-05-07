@@ -133,3 +133,4 @@ private[spark] object MinikubeStatus extends Enumeration {
   def status(value: String): Value = new Val(nextId, value)
   def unapply(s: String): Option[Value] = values.find(s == _.toString)
 }
+

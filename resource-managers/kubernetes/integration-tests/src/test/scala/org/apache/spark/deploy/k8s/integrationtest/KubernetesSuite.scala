@@ -36,9 +36,11 @@ import org.apache.spark.deploy.k8s.integrationtest.TestConfig._
 import org.apache.spark.deploy.k8s.integrationtest.backend.{IntegrationTestBackend, IntegrationTestBackendFactory}
 import org.apache.spark.internal.Logging
 
+object NoDCOS extends Tag("NO_DCOS")
+
 private[spark] class KubernetesSuite extends SparkFunSuite
   with BeforeAndAfterAll with BeforeAndAfter with BasicTestsSuite with SecretsTestsSuite
-  with PythonTestsSuite with ClientModeTestsSuite
+  with PythonTestsSuite with ClientModeTestsSuite with RTestsSuite
   with Logging with Eventually with Matchers {
 
   import KubernetesSuite._
@@ -109,6 +111,7 @@ private[spark] class KubernetesSuite extends SparkFunSuite
       .set("spark.kubernetes.driver.pod.name", driverPodName)
       .set("spark.kubernetes.driver.label.spark-app-locator", appLocator)
       .set("spark.kubernetes.executor.label.spark-app-locator", appLocator)
+      .set("spark.kubernetes.container.image.pullPolicy", "Always")
     if (!kubernetesTestComponents.hasUserSpecifiedNamespace) {
       kubernetesTestComponents.createNamespace()
     }
@@ -343,6 +346,7 @@ private[spark] class KubernetesSuite extends SparkFunSuite
 
 private[spark] object KubernetesSuite {
   val k8sTestTag = Tag("k8s")
+  val nonJavaTestTag = Tag("nonJava")
   val SPARK_PI_MAIN_CLASS: String = "org.apache.spark.examples.SparkPi"
   val SPARK_REMOTE_MAIN_CLASS: String = "org.apache.spark.examples.SparkRemoteFileTest"
   val SPARK_DRIVER_MAIN_CLASS: String = "org.apache.spark.examples.DriverSubmissionTest"
