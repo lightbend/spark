@@ -40,7 +40,9 @@ private[spark] trait BasicTestsSuite { k8sSuite: KubernetesSuite =>
       appResource = SparkLauncher.NO_RESOURCE)
   }
 
-  test("Run SparkPi with a master URL without a scheme.", k8sTestTag) {
+
+  test("Run SparkPi with a master URL without a scheme.",
+    Array(k8sTestTag, NoDCOS): _*) {
     val url = kubernetesTestComponents.kubernetesClient.getMasterUrl
     val k8sMasterUrl = if (url.getPort < 0) {
       s"k8s://${url.getHost}"
@@ -92,6 +94,13 @@ private[spark] trait BasicTestsSuite { k8sSuite: KubernetesSuite =>
     sparkAppConf
       .set("spark.files", REMOTE_PAGE_RANK_DATA_FILE)
     runSparkRemoteCheckAndVerifyCompletion(appArgs = Array(REMOTE_PAGE_RANK_FILE_NAME))
+  }
+
+  test("All pods have the same service account by default", k8sTestTag) {
+    runSparkPiAndVerifyCompletion(
+      executorPodChecker = (executorPod: Pod) => {
+        doExecutorServiceAccountCheck(executorPod, kubernetesTestComponents.serviceAccountName)
+      })
   }
 }
 

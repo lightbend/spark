@@ -24,6 +24,9 @@ private[spark] class KubernetesExecutorBuilder(
     provideBasicStep: (KubernetesConf [KubernetesExecutorSpecificConf])
       => BasicExecutorFeatureStep =
       new BasicExecutorFeatureStep(_),
+    provideCredentialsStep: (KubernetesConf [KubernetesExecutorSpecificConf])
+      => ExecutorKubernetesCredentialsFeatureStep =
+    new ExecutorKubernetesCredentialsFeatureStep(_),
     provideSecretsStep: (KubernetesConf[_ <: KubernetesRoleSpecificConf])
       => MountSecretsFeatureStep =
       new MountSecretsFeatureStep(_),
@@ -41,6 +44,7 @@ private[spark] class KubernetesExecutorBuilder(
     kubernetesConf: KubernetesConf[KubernetesExecutorSpecificConf]): SparkPod = {
 
     val baseFeatures = Seq(provideBasicStep(kubernetesConf), provideLocalDirsStep(kubernetesConf))
+    val credentialFeature = Seq(provideCredentialsStep(kubernetesConf))
     val secretFeature = if (kubernetesConf.roleSecretNamesToMountPaths.nonEmpty) {
       Seq(provideSecretsStep(kubernetesConf))
     } else Nil
@@ -51,7 +55,8 @@ private[spark] class KubernetesExecutorBuilder(
       Seq(provideVolumesStep(kubernetesConf))
     } else Nil
 
-    val allFeatures = baseFeatures ++ secretFeature ++ secretEnvFeature ++ volumesFeature
+    val allFeatures = baseFeatures ++
+      credentialFeature ++ secretFeature ++ secretEnvFeature ++ volumesFeature
 
     var executorPod = SparkPod.initialPod()
     for (feature <- allFeatures) {
