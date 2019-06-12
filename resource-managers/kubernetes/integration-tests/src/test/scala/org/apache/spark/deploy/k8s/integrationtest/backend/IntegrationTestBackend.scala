@@ -19,6 +19,7 @@ package org.apache.spark.deploy.k8s.integrationtest.backend
 
 import io.fabric8.kubernetes.client.DefaultKubernetesClient
 
+import org.apache.spark.deploy.k8s.integrationtest.backend.cloud.CloudTestBackend
 import org.apache.spark.deploy.k8s.integrationtest.backend.minikube.MinikubeTestBackend
 
 private[spark] trait IntegrationTestBackend {
@@ -35,7 +36,11 @@ private[spark] object IntegrationTestBackendFactory {
       .getOrElse("minikube")
     if (deployMode == "minikube") {
       MinikubeTestBackend
-    } else {
+    }
+    else if (deployMode == "cloud") {
+      CloudTestBackend
+    }
+    else {
       throw new IllegalArgumentException(
         "Invalid " + deployModeConfigKey + ": " + deployMode)
     }

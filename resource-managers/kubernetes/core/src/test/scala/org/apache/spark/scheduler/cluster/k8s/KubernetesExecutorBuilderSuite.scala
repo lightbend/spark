@@ -31,6 +31,8 @@ class KubernetesExecutorBuilderSuite extends SparkFunSuite {
 
   private val basicFeatureStep = KubernetesFeaturesTestUtils.getMockConfigStepForStepType(
     BASIC_STEP_TYPE, classOf[BasicExecutorFeatureStep])
+  private val credentialsStep = KubernetesFeaturesTestUtils.getMockConfigStepForStepType(
+    BASIC_STEP_TYPE, classOf[ExecutorKubernetesCredentialsFeatureStep])
   private val mountSecretsStep = KubernetesFeaturesTestUtils.getMockConfigStepForStepType(
     SECRETS_STEP_TYPE, classOf[MountSecretsFeatureStep])
   private val envSecretsStep = KubernetesFeaturesTestUtils.getMockConfigStepForStepType(
@@ -42,6 +44,7 @@ class KubernetesExecutorBuilderSuite extends SparkFunSuite {
 
   private val builderUnderTest = new KubernetesExecutorBuilder(
     _ => basicFeatureStep,
+    _ => credentialsStep,
     _ => mountSecretsStep,
     _ => envSecretsStep,
     _ => localDirsStep,
