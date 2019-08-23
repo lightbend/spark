@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-FROM registry.access.redhat.com/redhat-openjdk-18/openjdk18-openshift:1.6-20
+FROM registry.access.redhat.com/redhat-openjdk-18/openjdk18-openshift:1.6-23
 
 ARG spark_jars=jars
 ARG img_path=kubernetes/dockerfiles
@@ -44,7 +44,7 @@ RUN mkdir -p /opt/spark/work-dir && \
     chmod -R u+x /opt/spark/bin && \
     chmod -R u+x /opt/spark/sbin
 
-FROM registry.access.redhat.com/redhat-openjdk-18/openjdk18-openshift:1.6-20
+FROM registry.access.redhat.com/redhat-openjdk-18/openjdk18-openshift:1.6-23
 
 USER root
 COPY --from=0 /opt /opt
