@@ -61,7 +61,7 @@ RUN set -ex && \
     mkdir -p /etc/metrics/conf && \
     mkdir -p /prometheus && \
     wget https://s3-us-west-2.amazonaws.com/fdp-kubernetes-builds/spark/extra/metrics.properties -O /etc/metrics/conf/metrics.properties && \
-    wget  http://central.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.3.1/jmx_prometheus_javaagent-0.3.1.jar -O /prometheus/jmx_prometheus_javaagent-0.3.1.jar && \
+    wget  https://repo1.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.11.0/jmx_prometheus_javaagent-0.11.0.jar -O /prometheus/jmx_prometheus_javaagent-0.11.0.jar && \
     wget https://s3-us-west-2.amazonaws.com/fdp-kubernetes-builds/spark/extra/spark-prom-exporter.yml -O /etc/metrics/conf/prometheus.yaml && \
     chgrp -R 0 /prometheus  && \
     chmod -R g=u /prometheus && \
