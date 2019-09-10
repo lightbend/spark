@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-FROM registry.access.redhat.com/redhat-openjdk-18/openjdk18-openshift:1.6-23
+FROM registry.access.redhat.com/redhat-openjdk-18/openjdk18-openshift:1.6-23.1567588116
 
 ARG spark_jars=jars
 ARG img_path=kubernetes/dockerfiles
