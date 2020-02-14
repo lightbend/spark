@@ -32,64 +32,67 @@ private[spark] trait ClientModeTestsSuite { k8sSuite: KubernetesSuite =>
       .services()
       .inNamespace(kubernetesTestComponents.namespace)
       .createNew()
-        .withNewMetadata()
-          .withName(s"$driverPodName-svc")
-          .endMetadata()
-        .withNewSpec()
-          .withClusterIP("None")
-          .withSelector(labels.asJava)
-          .addNewPort()
-            .withName("driver-port")
-            .withPort(driverPort)
-            .withNewTargetPort(driverPort)
-            .endPort()
-          .addNewPort()
-            .withName("block-manager")
-            .withPort(blockManagerPort)
-            .withNewTargetPort(blockManagerPort)
-            .endPort()
-          .endSpec()
-        .done()
+      .withNewMetadata()
+      .withName(s"$driverPodName-svc")
+      .endMetadata()
+      .withNewSpec()
+      .withClusterIP("None")
+      .withSelector(labels.asJava)
+      .addNewPort()
+      .withName("driver-port")
+      .withPort(driverPort)
+      .withNewTargetPort(driverPort)
+      .endPort()
+      .addNewPort()
+      .withName("block-manager")
+      .withPort(blockManagerPort)
+      .withNewTargetPort(blockManagerPort)
+      .endPort()
+      .endSpec()
+      .done()
     try {
+      val preCommand = "myuid=$(id -u); mygid=$(id -g); " +
+        "set +e; uidentry=$(getent passwd $myuid); set -e; " +
+        "echo \"$myuid:x:$myuid:$mygid:anonymous uid:$SPARK_HOME:/bin/false\" " +
+        ">> /etc/passwd; whoami; "
       val driverPod = testBackend
         .getKubernetesClient
         .pods()
         .inNamespace(kubernetesTestComponents.namespace)
         .createNew()
-          .withNewMetadata()
-          .withName(driverPodName)
-          .withLabels(labels.asJava)
-          .endMetadata()
+        .withNewMetadata()
+        .withName(driverPodName)
+        .withLabels(labels.asJava)
+        .endMetadata()
         .withNewSpec()
-          .withServiceAccountName(kubernetesTestComponents.serviceAccountName)
-          .addNewContainer()
-            .withName("spark-example")
-            .withImage(image)
-            .withImagePullPolicy("IfNotPresent")
-            .withCommand("/opt/spark/bin/run-example")
-            .addToArgs("--master", s"k8s://https://kubernetes.default.svc")
-            .addToArgs("--deploy-mode", "client")
-            .addToArgs("--conf", s"spark.kubernetes.container.image=$image")
-            .addToArgs(
-              "--conf",
-              s"spark.kubernetes.namespace=${kubernetesTestComponents.namespace}")
-            .addToArgs("--conf", "spark.kubernetes.authenticate.oauthTokenFile=" +
-              "/var/run/secrets/kubernetes.io/serviceaccount/token")
-            .addToArgs("--conf", "spark.kubernetes.authenticate.caCertFile=" +
-              "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
-            .addToArgs("--conf", s"spark.kubernetes.driver.pod.name=$driverPodName")
-            .addToArgs("--conf", "spark.executor.memory=500m")
-            .addToArgs("--conf", "spark.executor.cores=1")
-            .addToArgs("--conf", "spark.executor.instances=1")
-            .addToArgs("--conf",
-              s"spark.driver.host=" +
-                s"${driverService.getMetadata.getName}.${kubernetesTestComponents.namespace}.svc")
-            .addToArgs("--conf", s"spark.driver.port=$driverPort")
-            .addToArgs("--conf", s"spark.driver.blockManager.port=$blockManagerPort")
-            .addToArgs("SparkPi")
-            .addToArgs("10")
-            .endContainer()
-          .endSpec()
+        .withServiceAccountName(kubernetesTestComponents.serviceAccountName)
+        .addNewContainer()
+        .withName("spark-example")
+        .withImage(image)
+        .withImagePullPolicy("IfNotPresent")
+        .withCommand("/bin/sh", "-c", preCommand + "/opt/spark/bin/run-example " +
+          "--master " + s"k8s://https://kubernetes.default.svc" +
+          " --deploy-mode " + "client " +
+          "--conf " + s"spark.kubernetes.container.image=$image" +
+          " --conf " +
+          s"spark.kubernetes.namespace=${kubernetesTestComponents.namespace}" +
+          " --conf " + "spark.kubernetes.authenticate.oauthTokenFile=" +
+          "/var/run/secrets/kubernetes.io/serviceaccount/token" +
+          " --conf " + "spark.kubernetes.authenticate.caCertFile=" +
+          "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt" +
+          " --conf " + s"spark.kubernetes.driver.pod.name=$driverPodName" +
+          " --conf " + "spark.executor.memory=500m" +
+          " --conf " + "spark.executor.cores=1" +
+          " --conf " + "spark.executor.instances=1" +
+          " --conf " +
+          s"spark.driver.host=" +
+          s"${driverService.getMetadata.getName}.${kubernetesTestComponents.namespace}.svc" +
+          " --conf " + s"spark.driver.port=$driverPort" +
+          " --conf " + s"spark.driver.blockManager.port=$blockManagerPort" +
+          " SparkPi" +
+          " 10")
+        .endContainer()
+        .endSpec()
         .done()
       Eventually.eventually(TIMEOUT, INTERVAL) {
         assert(kubernetesTestComponents.kubernetesClient
@@ -107,5 +110,4 @@ private[spark] trait ClientModeTestsSuite { k8sSuite: KubernetesSuite =>
         .delete(driverService)
     }
   }
-
 }

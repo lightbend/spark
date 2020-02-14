@@ -21,9 +21,9 @@ import org.apache.spark.deploy.k8s.integrationtest.TestConfig.{getTestImageRepo,
 private[spark] trait RTestsSuite { k8sSuite: KubernetesSuite =>
 
   import RTestsSuite._
-  import KubernetesSuite.k8sTestTag
+  import KubernetesSuite.{k8sTestTag, nonJavaTestTag}
 
-  test("Run SparkR on simple dataframe.R example", k8sTestTag) {
+  test("Run SparkR on simple dataframe.R example", k8sTestTag, nonJavaTestTag) {
     sparkAppConf
       .set("spark.kubernetes.container.image", s"${getTestImageRepo}/spark-r:${getTestImageTag}")
     runSparkApplicationAndVerifyCompletion(

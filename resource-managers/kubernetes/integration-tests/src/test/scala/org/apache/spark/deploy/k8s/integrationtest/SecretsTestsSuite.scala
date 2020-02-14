@@ -21,7 +21,8 @@ import scala.collection.JavaConverters._
 import io.fabric8.kubernetes.api.model.{Pod, SecretBuilder}
 import org.apache.commons.codec.binary.Base64
 import org.apache.commons.io.output.ByteArrayOutputStream
-import org.scalatest.concurrent.Eventually
+import org.scalatest.concurrent.{Eventually, PatienceConfiguration}
+import org.scalatest.time.{Milliseconds, Span}
 
 import org.apache.spark.deploy.k8s.integrationtest.KubernetesSuite._
 
@@ -72,7 +73,7 @@ private[spark] trait SecretsTestsSuite { k8sSuite: KubernetesSuite =>
           doBasicExecutorPodCheck(executorPod)
           checkSecrets(executorPod)
         },
-        appArgs = Array("1000") // give it enough time for all execs to be visible
+        appArgs = Array("10000") // give it enough time for all execs to be visible
       )
     } finally {
       // make sure this always run
@@ -81,7 +82,7 @@ private[spark] trait SecretsTestsSuite { k8sSuite: KubernetesSuite =>
   }
 
   private def checkSecrets(pod: Pod): Unit = {
-    Eventually.eventually(TIMEOUT, INTERVAL) {
+    Eventually.eventually(TIMEOUT, SecretsTestsSuite.INTERVAL) {
       implicit val podName: String = pod.getMetadata.getName
       val env = executeCommand("env")
       assert(env.toString.contains(ENV_SECRET_VALUE_1))
@@ -105,7 +106,7 @@ private[spark] trait SecretsTestsSuite { k8sSuite: KubernetesSuite =>
       .withTTY()
       .exec(cmd.toArray: _*)
     // wait to get some result back
-    Thread.sleep(1000)
+    Thread.sleep(100)
     watch.close()
     out.flush()
     out.toString()
@@ -113,6 +114,7 @@ private[spark] trait SecretsTestsSuite { k8sSuite: KubernetesSuite =>
 }
 
 private[spark] object SecretsTestsSuite {
+  val INTERVAL = PatienceConfiguration.Interval(Span(1, Milliseconds))
   val ENV_SECRET_NAME = "mysecret"
   val SECRET_MOUNT_PATH = "/etc/secret"
   val ENV_SECRET_KEY_1 = "username"
