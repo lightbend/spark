@@ -43,8 +43,6 @@ RUN mkdir -p /opt/spark/work-dir && \
     chmod -R u+x /opt/spark/bin && \
     chmod -R u+x /opt/spark/sbin
 
-FROM openjdk:8-alpine
-
 COPY --from=0 /opt /opt
 
 RUN set -ex && \
