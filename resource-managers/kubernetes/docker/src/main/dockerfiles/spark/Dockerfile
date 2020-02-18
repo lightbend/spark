@@ -58,7 +58,7 @@ RUN set -ex && \
     ln -sv /bin/bash /bin/sh && \
     echo "auth required pam_wheel.so use_uid" >> /etc/pam.d/su && \
     chgrp root /etc/passwd && chmod ug+rw /etc/passwd && \
-    rm -rf /var/cache/apt/*
+    rm -rf /var/cache/apt/* && \
     mkdir -p /etc/metrics/conf && \
     mkdir -p /prometheus && \
     wget https://s3-us-west-2.amazonaws.com/fdp-kubernetes-builds/spark/extra/metrics.properties -O /etc/metrics/conf/metrics.properties && \
