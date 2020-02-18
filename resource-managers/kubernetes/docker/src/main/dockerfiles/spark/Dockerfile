@@ -43,8 +43,6 @@ RUN mkdir -p /opt/spark/work-dir && \
     chmod -R u+x /opt/spark/bin && \
     chmod -R u+x /opt/spark/sbin
 
-COPY --from=0 /opt /opt
-
 RUN set -ex && \
     apt-get update && \
     ln -s /lib /lib64 && \
