@@ -43,10 +43,14 @@ RUN mkdir -p /opt/spark/work-dir && \
     chmod -R u+x /opt/spark/bin && \
     chmod -R u+x /opt/spark/sbin
 
+FROM openjdk:8-alpine
+
+COPY --from=0 /opt /opt
+
 RUN set -ex && \
-    apt-get update && \
+    apk upgrade --no-cache && \
     ln -s /lib /lib64 && \
-    apt install -y bash tini wget libc6 libpam-modules libnss3 && \
+    apk add --no-cache bash tini libc6-compat linux-pam nss && \
     mkdir -p /opt/spark && \
     mkdir -p /opt/spark/work-dir && \
     touch /opt/spark/RELEASE && \
@@ -54,7 +58,6 @@ RUN set -ex && \
     ln -sv /bin/bash /bin/sh && \
     echo "auth required pam_wheel.so use_uid" >> /etc/pam.d/su && \
     chgrp root /etc/passwd && chmod ug+rw /etc/passwd && \
-    rm -rf /var/cache/apt/* && \
     mkdir -p /etc/metrics/conf && \
     mkdir -p /prometheus && \
     wget https://s3-us-west-2.amazonaws.com/fdp-kubernetes-builds/spark/extra/metrics.properties -O /etc/metrics/conf/metrics.properties && \
