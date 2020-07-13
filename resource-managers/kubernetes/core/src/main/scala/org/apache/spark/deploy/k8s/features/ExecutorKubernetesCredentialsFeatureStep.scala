@@ -16,11 +16,13 @@
  */
 package org.apache.spark.deploy.k8s.features
 
+import io.fabric8.kubernetes.api.model.HasMetadata
+
 import org.apache.spark.deploy.k8s.{KubernetesConf, SparkPod}
 import org.apache.spark.deploy.k8s.Config.KUBERNETES_SERVICE_ACCOUNT_NAME
 import org.apache.spark.deploy.k8s.KubernetesUtils.buildPodWithServiceAccount
 
-private[spark] class ExecutorKubernetesCredentialsFeatureStep(kubernetesConf: KubernetesConf)
+private[spark] class ExecutorKubernetesCredentialsFeatureStep(kubernetesConf: KubernetesConf[_])
   extends KubernetesFeatureConfigStep {
   private lazy val driverServiceAccount = kubernetesConf.get(KUBERNETES_SERVICE_ACCOUNT_NAME)
 
@@ -33,5 +35,13 @@ private[spark] class ExecutorKubernetesCredentialsFeatureStep(kubernetesConf: Ku
       } else {
         pod.pod
       })
+  }
+
+  override def getAdditionalKubernetesResources(): Seq[HasMetadata] = {
+    Seq.empty
+  }
+
+  override def getAdditionalPodSystemProperties(): Map[String, String] = {
+    Map.empty
   }
 }
