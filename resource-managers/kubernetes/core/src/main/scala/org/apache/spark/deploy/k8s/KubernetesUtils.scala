@@ -60,4 +60,15 @@ private[spark] object KubernetesUtils {
   }
 
   def parseMasterUrl(url: String): String = url.substring("k8s://".length)
+
+  def buildPodWithServiceAccount(serviceAccount: Option[String], pod: SparkPod): Option[Pod] = {
+    serviceAccount.map { account =>
+      new PodBuilder(pod.pod)
+        .editOrNewSpec()
+        .withServiceAccount(account)
+        .withServiceAccountName(account)
+        .endSpec()
+        .build()
+    }
+  }
 }
